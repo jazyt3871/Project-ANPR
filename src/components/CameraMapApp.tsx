@@ -130,7 +130,7 @@ export function CameraMapApp() {
     setSelectedId(camera.id);
   }, []);
 
-  const locateMe = useCallback(() => {
+  const locateMe = useCallback((options?: { silent?: boolean }) => {
     if (!("geolocation" in navigator)) return;
     navigator.geolocation.getCurrentPosition(
       (pos) => {
@@ -142,10 +142,47 @@ export function CameraMapApp() {
         });
         setRecenterToken((n) => n + 1);
       },
-      () => setFetchError("Could not read your location. Check the site's permissions."),
+      () => {
+        // A silent auto-locate failing is not worth an error banner: the user
+        // never asked for it, and the map is already showing something useful.
+        if (!options?.silent) {
+          setFetchError("Could not read your location. Check the site's permissions.");
+        }
+      },
       { enableHighAccuracy: true, timeout: 15_000, maximumAge: 30_000 },
     );
   }, []);
+
+  const handleLocateClick = useCallback(() => locateMe(), [locateMe]);
+
+  /* ------------------------------------------------------------- locate -- */
+  /**
+   * Centre on the user automatically, but only once they have already granted
+   * location permission — checked via the Permissions API, which reports the
+   * stored decision without prompting.
+   *
+   * Calling getCurrentPosition unconditionally on mount would fire the browser
+   * dialog before the user has done anything, which is the most-denied kind of
+   * prompt; and a denial is sticky per origin, so one bad first impression
+   * costs the feature permanently. The button remains the way to grant it.
+   */
+  useEffect(() => {
+    if (!("geolocation" in navigator) || !navigator.permissions?.query) return;
+
+    let cancelled = false;
+    navigator.permissions
+      .query({ name: "geolocation" as PermissionName })
+      .then((result) => {
+        if (!cancelled && result.state === "granted") locateMe({ silent: true });
+      })
+      .catch(() => {
+        /* Safari < 16 has no geolocation descriptor — the button still works */
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [locateMe]);
 
   /* -------------------------------------------------------------- render -- */
   const isEmpty = cameraList.length === 0 && !loading && !fetchError;
@@ -199,7 +236,7 @@ export function CameraMapApp() {
           <span className="flex items-center gap-0.5">
             <button
               type="button"
-              onClick={locateMe}
+              onClick={handleLocateClick}
               aria-label="Centre the map on my location"
               className="grid size-9 place-items-center rounded-lg text-graphite transition-colors hover:bg-raised hover:text-ink"
             >

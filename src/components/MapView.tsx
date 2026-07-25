@@ -37,6 +37,49 @@ const ATTRIBUTION =
 const FALLBACK_VIEW: L.LatLngTuple = [43.6532, -79.3832];
 const FALLBACK_ZOOM = 13;
 
+/** Last map centre + zoom, so a return visit opens where you left off. */
+const VIEW_KEY = "sightline:view";
+
+type StoredView = { lat: number; lng: number; zoom: number };
+
+function readStoredView(): StoredView | null {
+  try {
+    const raw = window.localStorage.getItem(VIEW_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as Partial<StoredView>;
+    // Anything out of range means a corrupt or hand-edited entry: ignore it
+    // rather than handing Leaflet coordinates it will throw on.
+    if (
+      typeof v.lat !== "number" ||
+      typeof v.lng !== "number" ||
+      typeof v.zoom !== "number" ||
+      !Number.isFinite(v.lat) ||
+      !Number.isFinite(v.lng) ||
+      Math.abs(v.lat) > 90 ||
+      Math.abs(v.lng) > 180 ||
+      v.zoom < 1 ||
+      v.zoom > 20
+    ) {
+      return null;
+    }
+    return { lat: v.lat, lng: v.lng, zoom: v.zoom };
+  } catch {
+    return null; // private mode, or JSON that isn't ours
+  }
+}
+
+function writeStoredView(map: L.Map) {
+  try {
+    const c = map.getCenter();
+    window.localStorage.setItem(
+      VIEW_KEY,
+      JSON.stringify({ lat: c.lat, lng: c.lng, zoom: map.getZoom() }),
+    );
+  } catch {
+    /* quota or private mode — the view just won't persist */
+  }
+}
+
 export default function MapView({
   cameras,
   selectedId,
@@ -63,9 +106,13 @@ export default function MapView({
   useEffect(() => {
     if (!hostRef.current || mapRef.current) return;
 
+    // Restored inside the effect, not at module scope: localStorage does not
+    // exist during SSR, and reading it here keeps the first paint honest.
+    const stored = readStoredView();
+
     const map = L.map(hostRef.current, {
-      center: FALLBACK_VIEW,
-      zoom: FALLBACK_ZOOM,
+      center: stored ? [stored.lat, stored.lng] : FALLBACK_VIEW,
+      zoom: stored ? stored.zoom : FALLBACK_ZOOM,
       zoomControl: false,
       attributionControl: true,
     });
@@ -91,6 +138,7 @@ export default function MapView({
     };
 
     map.on("moveend zoomend", report);
+    map.on("moveend zoomend", () => writeStoredView(map));
     map.on("click", (e: L.LeafletMouseEvent) => {
       if (cb.current.pickMode) cb.current.onPick(e.latlng.lat, e.latlng.lng);
       else cb.current.onSelect(null);
