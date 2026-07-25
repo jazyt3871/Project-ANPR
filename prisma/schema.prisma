@@ -1,0 +1,69 @@
+// Sightline — data model
+//
+// The database is Supabase Postgres with PostGIS. Everything this file declares
+// is also declared in supabase/schema.sql, which is the one-click setup script
+// and the source of truth for the parts Prisma cannot express: the postgis
+// extension, the `location` geometry column with its trigger and GiST index,
+// the check constraints, RLS, and the storage bucket policies.
+//
+// Setup:
+//   1. run supabase/schema.sql in the Supabase SQL Editor
+//   2. set DATABASE_URL / DIRECT_URL from Project Settings -> Database
+//   3. npx prisma generate   (`prisma db push` is a no-op if step 1 ran)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Supabase's transaction pooler (port 6543) — what serverless functions use.
+  url = env("DATABASE_URL")
+  // Direct connection (port 5432) — migrations only; the pooler can't run DDL.
+  directUrl = env("DIRECT_URL")
+}
+
+model Camera {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  // WGS84 position captured by navigator.geolocation
+  lat      Float  @map("latitude")
+  lng      Float  @map("longitude")
+  accuracy Float? // reported horizontal accuracy radius, in metres
+
+  // Where the camera is looking: degrees clockwise from true north
+  heading       Float
+  headingSource String @default("sensor") @map("heading_source") // "sensor" | "manual"
+
+  // Object key in the camera-photos bucket (YYYY/MM/<uuid>.<ext>), resolved to
+  // a URL at read time by photoUrl() in src/lib/storage.ts
+  photoKey    String @map("photo_key")
+  photoWidth  Int?   @map("photo_width")
+  photoHeight Int?   @map("photo_height")
+
+  note       String?
+  capturedAt DateTime @map("captured_at") // when the submitter stood at the spot
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Coarse, non-identifying submitter tag so abusive sources can be rate-limited
+  submitterHash String? @map("submitter_hash")
+
+  // NOTE: the `location` geometry(Point, 4326) column is deliberately absent
+  // here. Prisma has no geometry type, and the trigger in supabase/schema.sql
+  // keeps it in sync from latitude/longitude. Spatial reads go via $queryRaw.
+
+  @@index([lat, lng])
+  @@index([createdAt])
+  @@map("cameras")
+}
+
+/// Shared state for the submission limiter. On Vercel each request may land on
+/// a different instance, so this cannot live in process memory.
+model RateLimitHit {
+  id  BigInt   @id @default(autoincrement())
+  key String
+  at  DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([key, at(sort: Desc)])
+  @@map("rate_limit_hits")
+}

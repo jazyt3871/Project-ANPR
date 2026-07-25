@@ -1,0 +1,21 @@
+node_modules
+.next
+out
+build
+.DS_Store
+*.pem
+
+# local env + secrets
+.env
+.env*.local
+
+# sqlite database
+prisma/dev.db
+prisma/dev.db-journal
+
+# locally stored photo uploads
+storage/
+
+# typescript
+next-env.d.ts
+*.tsbuildinfo

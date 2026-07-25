@@ -1,0 +1,424 @@
+@import "tailwindcss";
+
+/* Dark is the working default — this is a tool used outdoors after dark — but
+   every colour is a token, so the light theme is a class flip, not a fork. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ==========================================================================
+   Palette: "sodium & slate"
+   Night-survey instrument. One accent, borrowed from sodium-vapour street
+   lighting and survey marker tape. Green and red appear only where they carry
+   meaning: the quality of a GPS fix.
+   ========================================================================== */
+
+:root {
+  --void: #f4f6f8;
+  --panel: #ffffff;
+  --panel-raised: #ffffff;
+  --rule: #dde3ea;
+  --ink: #10161d;
+  --graphite: #5c6a78;
+  --sodium: #b06f00;
+  --sodium-ink: #1a1200;
+  --fix-good: #167c4a;
+  --fix-warn: #9a6100;
+  --fix-bad: #b3261e;
+  --shadow-lift: 0 1px 2px rgb(16 22 29 / 0.08), 0 8px 24px -8px rgb(16 22 29 / 0.16);
+}
+
+.dark {
+  --void: #0b0f14;
+  --panel: #131a22;
+  --panel-raised: #1a232e;
+  --rule: #1e2833;
+  --ink: #e8edf3;
+  --graphite: #7c8a99;
+  --sodium: #ffb026;
+  --sodium-ink: #1a1200;
+  --fix-good: #4ade80;
+  --fix-warn: #ffb026;
+  --fix-bad: #f97362;
+  --shadow-lift: 0 1px 2px rgb(0 0 0 / 0.5), 0 12px 32px -8px rgb(0 0 0 / 0.6);
+}
+
+@theme inline {
+  --color-void: var(--void);
+  --color-panel: var(--panel);
+  --color-raised: var(--panel-raised);
+  --color-rule: var(--rule);
+  --color-ink: var(--ink);
+  --color-graphite: var(--graphite);
+  --color-sodium: var(--sodium);
+  --color-sodium-ink: var(--sodium-ink);
+  --color-fix-good: var(--fix-good);
+  --color-fix-warn: var(--fix-warn);
+  --color-fix-bad: var(--fix-bad);
+
+  /* Space Grotesk carries the voice; Plex Mono carries every measured value.
+     The rule is strict: if a number was read off a sensor, it is set in mono. */
+  --font-display: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, "SFMono-Regular", monospace;
+}
+
+/* ==========================================================================
+   Base
+   ========================================================================== */
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    background-color: var(--void);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    overscroll-behavior-y: none;
+  }
+
+  /* Small-caps eyebrow labels, used for every field name in the capture flow. */
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--graphite);
+  }
+
+  /* A measured value. Tabular figures stop the readout jittering as it ticks. */
+  .readout {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--sodium);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+}
+
+/* ==========================================================================
+   Leaflet skin
+   Leaflet ships unlayered CSS, so these overrides are written to win on
+   specificity rather than relying on cascade order.
+   ========================================================================== */
+
+.leaflet-container {
+  background: var(--void);
+  font-family: var(--font-sans);
+  outline: none;
+}
+
+.leaflet-container a {
+  color: var(--ink);
+}
+
+.leaflet-control-attribution {
+  background: color-mix(in srgb, var(--panel) 88%, transparent) !important;
+  color: var(--graphite) !important;
+  font-family: var(--font-mono);
+  font-size: 9px !important;
+  letter-spacing: 0.02em;
+  padding: 2px 6px !important;
+  border-radius: 4px 0 0 0;
+}
+
+.leaflet-control-attribution a {
+  color: var(--graphite) !important;
+}
+
+.leaflet-bar,
+.leaflet-bar a {
+  background: var(--panel-raised) !important;
+  border-color: var(--rule) !important;
+  color: var(--ink) !important;
+  box-shadow: var(--shadow-lift);
+}
+
+.leaflet-bar a:hover {
+  background: var(--rule) !important;
+}
+
+/* Marker hit areas are 44px so they can be tapped with a thumb. */
+.camera-marker {
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.camera-marker svg {
+  display: block;
+  overflow: visible;
+  transition: transform 140ms ease-out;
+}
+
+.camera-marker[data-selected="true"] svg {
+  transform: scale(1.18);
+}
+
+/* The accuracy disc under the user's own position. */
+@keyframes pulse-fix {
+  0%,
+  100% {
+    opacity: 0.28;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.user-fix-pulse {
+  animation: pulse-fix 2.4s ease-in-out infinite;
+}
+
+/* Bottom sheet entrance. */
+@keyframes sheet-rise {
+  from {
+    transform: translateY(12px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.sheet-rise {
+  animation: sheet-rise 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Indeterminate progress used while the GPS accuracy is still converging. */
+@keyframes sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+.sweep-bar::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  width: 33%;
+  background: var(--sodium);
+  animation: sweep 1.4s ease-in-out infinite;
+}
+
+/* ==========================================================================
+   Sightline glyph + dial
+   Colours live here rather than in SVG presentation attributes. `var()` inside
+   an attribute value is inconsistently supported, whereas a CSS rule always
+   overrides a presentation attribute — so this is both safer and keeps every
+   colour decision in the stylesheet. Geometry stays in the markup.
+   ========================================================================== */
+
+.sl-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.sl-ray {
+  stroke: var(--sodium);
+}
+
+.sl-hub {
+  fill: var(--panel-raised);
+  stroke: var(--sodium);
+}
+
+.sl-hub-inset {
+  fill: var(--panel);
+  stroke: var(--sodium);
+}
+
+.sl-pip {
+  fill: var(--sodium);
+}
+
+.sl-card {
+  fill: var(--panel-raised);
+  stroke: var(--rule);
+}
+
+.sl-ring {
+  fill: none;
+  stroke: var(--rule);
+}
+
+.sl-north-pip {
+  fill: var(--graphite);
+}
+
+.sl-tick {
+  stroke: var(--graphite);
+}
+
+.sl-tick-major {
+  stroke: var(--ink);
+}
+
+.sl-label {
+  fill: var(--graphite);
+}
+
+.sl-label-north {
+  fill: var(--sodium);
+}
+
+.sl-value {
+  fill: var(--ink);
+}
+
+.sl-caption {
+  fill: var(--graphite);
+}
+
+.sl-error-arc {
+  fill: none;
+  stroke: var(--fix-warn);
+}
+
+/* Gradient stops are styled the same way, for the same reason. */
+.sl-stop-sodium {
+  stop-color: var(--sodium);
+}
+
+.sl-stop-good {
+  stop-color: var(--fix-good);
+}
+
+/* Leaflet writes stroke/fill as attributes from its path options; these rules
+   win, so the map vectors follow the theme like everything else. */
+.user-fix-accuracy {
+  stroke: var(--fix-good);
+  fill: var(--fix-good);
+  fill-opacity: 0.12;
+}
+
+.user-fix-dot {
+  stroke: var(--void);
+  fill: var(--fix-good);
+  fill-opacity: 1;
+}
+
+/* ==========================================================================
+   Sightline glyph and compass dial
+   Colours live here, not in `fill="var(--x)"` presentation attributes. var()
+   substitution in a presentation attribute is not reliable across engines,
+   whereas a CSS property always is — and this keeps the theme flip in one file.
+   ========================================================================== */
+
+#sightline-cone stop,
+#sightline-cone-dim stop {
+  stop-color: var(--sodium);
+}
+
+#fix-halo stop {
+  stop-color: var(--fix-good);
+}
+
+.sl-cone {
+  fill: url(#sightline-cone);
+}
+
+.sl-cone-dim {
+  fill: url(#sightline-cone-dim);
+}
+
+.sl-ray {
+  fill: none;
+  stroke: var(--sodium);
+}
+
+.sl-hub {
+  fill: var(--panel-raised);
+  stroke: var(--sodium);
+}
+
+.sl-core {
+  fill: var(--sodium);
+}
+
+.sl-ring {
+  fill: none;
+  stroke: var(--rule);
+}
+
+.sl-north {
+  fill: var(--graphite);
+}
+
+/* --- dial ---------------------------------------------------------------- */
+
+.dial-face {
+  fill: var(--panel-raised);
+  stroke: var(--rule);
+}
+
+.dial-tick {
+  stroke: var(--graphite);
+}
+
+.dial-tick-major {
+  stroke: var(--ink);
+}
+
+.dial-label {
+  fill: var(--graphite);
+  font-family: var(--font-mono);
+}
+
+.dial-label-north {
+  fill: var(--sodium);
+  font-family: var(--font-mono);
+}
+
+.dial-value {
+  fill: var(--ink);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+}
+
+.dial-caption {
+  fill: var(--graphite);
+  font-family: var(--font-mono);
+  letter-spacing: 0.16em;
+}
+
+.dial-index {
+  fill: var(--sodium);
+}
+
+.dial-error {
+  fill: none;
+  stroke: var(--fix-warn);
+}
+
+/* --- the user's own position on the map ---------------------------------- */
+
+.user-fix-disc {
+  stroke: var(--fix-good);
+  fill: var(--fix-good);
+}
+
+.user-fix-dot {
+  stroke: var(--void);
+  fill: var(--fix-good);
+}

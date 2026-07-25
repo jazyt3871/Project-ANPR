@@ -1,0 +1,40 @@
+{
+  "name": "sightline",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Crowdsourced map of camera locations: a GPS fix, the bearing the lens looks along, and a photo.",
+  "scripts": {
+    "dev": "next dev",
+    "dev:https": "next dev --experimental-https --hostname 0.0.0.0",
+    "build": "prisma generate && next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "db:push": "prisma db push",
+    "db:seed": "node scripts/seed.mjs",
+    "db:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "@supabase/supabase-js": "2.48.1",
+    "leaflet": "1.9.4",
+    "lucide-react": "0.577.0",
+    "next": "15.5.21",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "3.3.6",
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/leaflet": "1.9.21",
+    "@types/node": "22.13.1",
+    "@types/react": "19.0.8",
+    "@types/react-dom": "19.0.3",
+    "eslint": "9.39.5",
+    "eslint-config-next": "15.5.21",
+    "prisma": "6.19.3",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3"
+  }
+}
