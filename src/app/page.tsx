@@ -1,6 +1,17 @@
-import { CameraMapApp } from "@/components/CameraMapApp";
+import { createClient } from '@/utils/supabase/server'
+import { cookies } from 'next/headers'
 
-// The map is the page. Everything else floats over it.
-export default function Page() {
-  return <CameraMapApp />;
+export default async function Page() {
+  const cookieStore = await cookies()
+  const supabase = createClient(cookieStore)
+
+  const { data: todos } = await supabase.from('todos').select()
+
+  return (
+    <ul>
+      {todos?.map((todo) => (
+        <li key={todo.id}>{todo.name}</li>
+      ))}
+    </ul>
+  )
 }
