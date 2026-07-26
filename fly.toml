@@ -1,37 +1,30 @@
-# App only. The database is deployed separately — see
-# scripts/fly-db-setup.sh and "Deploying to Fly.io" in the README.
+# fly.toml app configuration file generated for project-anpr on 2026-07-26T08:17:49Z
 #
-#   fly apps create project-anpr
-#   fly volumes create uploads --app project-anpr --region <region> --size 1
-#   fly secrets set --app project-anpr \
-#     DATABASE_URL="postgresql://anpr:<password>@project-anpr-db.internal:5432/anpr" \
-#     SUBMITTER_SALT="$(openssl rand -hex 32)"
-#   fly deploy
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
 
-app = "project-anpr"
-primary_region = "iad"  # pick whatever region you created the volume in
+app = 'project-anpr'
+primary_region = 'ams'
 
 [build]
 
 [env]
-  UPLOAD_DIR = "/app/storage/uploads"
-  MAX_UPLOAD_BYTES = "8388608"
-  RATE_LIMIT_PER_HOUR = "20"
-  # DATABASE_URL and SUBMITTER_SALT are secrets (see above), not plain env —
-  # they hold credentials and must not end up in this file or in git.
+  MAX_UPLOAD_BYTES = '8388608'
+  RATE_LIMIT_PER_HOUR = '20'
+  UPLOAD_DIR = '/app/storage/uploads'
 
 [[mounts]]
-  source = "uploads"
-  destination = "/app/storage"
+  source = 'uploads'
+  destination = '/app/storage'
 
 [http_service]
   internal_port = 3000
   force_https = true
-  auto_stop_machines = "stop"
+  auto_stop_machines = 'stop'
   auto_start_machines = true
   min_machines_running = 0
-  processes = ["app"]
+  processes = ['app']
 
 [[vm]]
-  size = "shared-cpu-1x"
-  memory = "256mb"
+  size = 'shared-cpu-1x'
+  memory = '256mb'
