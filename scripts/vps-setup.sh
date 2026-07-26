@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # ===========================================================================
-# Sightline — Ubuntu VPS setup
+# Project ANPR — Ubuntu VPS setup
 #
-# Takes a bare Ubuntu 22.04/24.04 box to a running Sightline: local Postgres
-# with PostGIS, photos on local disk, the app behind nginx, firewall open on
-# the ports it actually needs and nothing else.
+# Takes a bare Ubuntu 22.04/24.04 box to a running Project ANPR: everything on
+# this one server — Postgres with PostGIS, photos on local disk, the site
+# itself served on port 3000.
 #
-#   sudo ./scripts/vps-setup.sh --domain cameras.example.com --email you@example.com
-#   sudo ./scripts/vps-setup.sh                 # IP-only, no TLS
-#   ./scripts/vps-setup.sh --check              # dependency report, changes nothing
+#   sudo ./scripts/vps-setup.sh                  # site on http://<server-ip>:3000
+#   sudo ./scripts/vps-setup.sh --port 8080      # a different port
+#   sudo ./scripts/vps-setup.sh --nginx --domain anpr.example.com --email you@example.com
+#   ./scripts/vps-setup.sh --check               # dependency report, changes nothing
 #
 # Idempotent: safe to re-run after a `git pull` to rebuild and restart.
 # ===========================================================================
@@ -17,11 +18,11 @@ set -euo pipefail
 # --------------------------------------------------------------------------
 # Defaults, all overridable by flag or environment
 # --------------------------------------------------------------------------
-APP_NAME="${APP_NAME:-sightline}"
+APP_NAME="${APP_NAME:-project-anpr}"
 APP_PORT="${APP_PORT:-3000}"
-APP_USER="${APP_USER:-$APP_NAME}"
-DB_NAME="${DB_NAME:-sightline}"
-DB_USER="${DB_USER:-sightline}"
+APP_USER="${APP_USER:-anpr}"
+DB_NAME="${DB_NAME:-anpr}"
+DB_USER="${DB_USER:-anpr}"
 DB_PASSWORD="${DB_PASSWORD:-}"          # generated on first run if empty
 DOMAIN="${DOMAIN:-}"
 LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-}"
@@ -30,7 +31,9 @@ UPLOAD_DIR="${UPLOAD_DIR:-}"            # defaults to <app>/storage/uploads
 MAX_UPLOAD_BYTES="${MAX_UPLOAD_BYTES:-8388608}"
 
 CHECK_ONLY=0
-WITH_NGINX=1
+# The site is served straight from the Node process on APP_PORT. nginx is
+# opt-in, for when you want a hostname and a TLS certificate in front of it.
+WITH_NGINX=0
 WITH_FIREWALL=1
 WITH_BUILD=1
 WITH_SEED=0
@@ -53,23 +56,24 @@ info() { printf '  %s%s%s\n' "$DIM" "$*" "$RESET"; }
 die()  { printf '\n%serror:%s %s\n' "$RED" "$RESET" "$*" >&2; exit 1; }
 
 usage() {
-  sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   cat <<'EOF'
 
 Options
+  --nginx               Put nginx in front of the app instead of serving the
+                        Node process directly. Implied by --domain.
   --domain <host>       Serve this hostname through nginx and request a
                         Let's Encrypt certificate for it.
-  --email <address>     Contact address for Let's Encrypt (implied by --domain
-                        if you want TLS; without it, nginx serves plain HTTP).
-  --port <n>            Port the Next.js server listens on (default 3000).
-                        Bound to 127.0.0.1 — nginx is the only public listener.
-  --db-name <name>      Database name (default sightline).
-  --db-user <name>      Database role (default sightline).
+  --email <address>     Contact address for Let's Encrypt. Without it nginx
+                        serves plain HTTP.
+  --port <n>            Port the site is served on (default 3000). Opened in
+                        the firewall unless nginx is fronting it.
+  --db-name <name>      Database name (default anpr).
+  --db-user <name>      Database role (default anpr).
   --db-password <pw>    Role password. Generated and written to .env if omitted.
   --upload-dir <path>   Where photos are written (default <app>/storage/uploads).
   --node-major <n>      Node major version to install if missing (default 22).
   --seed                Run `npm run db:seed` after the schema is applied.
-  --no-nginx            Skip nginx; expose the app port directly instead.
   --no-firewall         Do not touch ufw.
   --no-build            Skip npm install / prisma generate / next build.
   --check               Report on dependencies and ports, change nothing.
@@ -82,7 +86,7 @@ EOF
 # --------------------------------------------------------------------------
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --domain)       DOMAIN="${2:?--domain needs a value}"; shift 2 ;;
+    --domain)       DOMAIN="${2:?--domain needs a value}"; WITH_NGINX=1; shift 2 ;;
     --email)        LETSENCRYPT_EMAIL="${2:?--email needs a value}"; shift 2 ;;
     --port)         APP_PORT="${2:?--port needs a value}"; shift 2 ;;
     --db-name)      DB_NAME="${2:?--db-name needs a value}"; shift 2 ;;
@@ -91,7 +95,7 @@ while [[ $# -gt 0 ]]; do
     --upload-dir)   UPLOAD_DIR="${2:?--upload-dir needs a value}"; shift 2 ;;
     --node-major)   NODE_MAJOR="${2:?--node-major needs a value}"; shift 2 ;;
     --seed)         WITH_SEED=1; shift ;;
-    --no-nginx)     WITH_NGINX=0; shift ;;
+    --nginx)        WITH_NGINX=1; shift ;;
     --no-firewall)  WITH_FIREWALL=0; shift ;;
     --no-build)     WITH_BUILD=0; shift ;;
     --check)        CHECK_ONLY=1; shift ;;
@@ -134,7 +138,9 @@ report_dependencies() {
   fi
 
   local name
-  for name in node npm psql nginx ufw certbot git openssl; do
+  local wanted=(node npm psql ufw git openssl)
+  [[ $WITH_NGINX == 1 ]] && wanted+=(nginx certbot)
+  for name in "${wanted[@]}"; do
     if have "$name"; then
       ok "$name $(version_of "$name")"
     else
@@ -348,9 +354,13 @@ if [[ $WITH_BUILD == 1 ]]; then
   git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
   run_as_app() { sudo -u "$APP_USER" env "HOME=/var/lib/${APP_USER}" "PATH=$PATH" "$@"; }
 
-  if [[ -f "$APP_DIR/package-lock.json" ]]; then
-    (cd "$APP_DIR" && run_as_app npm ci --no-audit --fund=false)
+  # npm ci is the reproducible path, but it refuses to run when the lockfile
+  # has drifted from package.json; fall back rather than fail the deploy.
+  if [[ -f "$APP_DIR/package-lock.json" ]] \
+     && (cd "$APP_DIR" && run_as_app npm ci --no-audit --fund=false); then
+    :
   else
+    warn "npm ci unavailable or out of sync — falling back to npm install"
     (cd "$APP_DIR" && run_as_app npm install --no-audit --fund=false)
   fi
   (cd "$APP_DIR" && run_as_app npx prisma generate)
@@ -376,7 +386,7 @@ LISTEN_HOST="127.0.0.1"
 
 cat > "/etc/systemd/system/${APP_NAME}.service" <<EOF
 [Unit]
-Description=Sightline (Next.js)
+Description=Project ANPR (Next.js)
 After=network-online.target postgresql.service
 Wants=network-online.target
 Requires=postgresql.service
@@ -466,8 +476,9 @@ fi
 # --------------------------------------------------------------------------
 # 8. Firewall
 #
-# Postgres (5432) and the Node port are deliberately absent: both listen on
-# loopback only, so opening them would widen the surface for nothing.
+# Postgres (5432) is deliberately absent: it listens on loopback only, so
+# opening it would widen the surface for nothing. The app's own port is opened
+# only when nginx is not fronting it.
 # --------------------------------------------------------------------------
 if [[ $WITH_FIREWALL == 1 ]]; then
   step "Firewall (ufw)"
@@ -479,7 +490,7 @@ if [[ $WITH_FIREWALL == 1 ]]; then
     ufw allow 80/tcp >/dev/null;  ok "80/tcp (HTTP)"
     ufw allow 443/tcp >/dev/null; ok "443/tcp (HTTPS)"
   else
-    ufw allow "${APP_PORT}/tcp" >/dev/null; ok "${APP_PORT}/tcp (app, no nginx)"
+    ufw allow "${APP_PORT}/tcp" >/dev/null; ok "${APP_PORT}/tcp (the site)"
   fi
   ufw --force enable >/dev/null
   ufw status verbose | sed 's/^/  /'
@@ -515,7 +526,7 @@ fi
 
 cat <<EOF
 
-${GREEN}${BOLD}Sightline is up.${RESET}  ${BOLD}${URL}${RESET}
+${GREEN}${BOLD}Project ANPR is up.${RESET}  ${BOLD}${URL}${RESET}
 
   logs        journalctl -u ${APP_NAME} -f
   restart     systemctl restart ${APP_NAME}
@@ -526,7 +537,7 @@ ${GREEN}${BOLD}Sightline is up.${RESET}  ${BOLD}${URL}${RESET}
   Redeploy after a git pull:
     cd ${APP_DIR} && git pull && sudo ./scripts/vps-setup.sh
 
-  Note: the GPS and compass steps need HTTPS in the browser. Over plain HTTP
-  they only work on localhost — run with --domain and --email for a real
-  certificate.
+  Note: the GPS and compass steps need a secure context in the browser. Over
+  plain HTTP on an IP address they will not work — for phone capture, run with
+  --nginx --domain <host> --email <you> to get a real certificate.
 EOF

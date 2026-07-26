@@ -17,11 +17,11 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Sightline — crowdsourced camera map",
+  title: "Project ANPR — crowdsourced camera map",
   description:
     "Map camera locations from the street: a GPS fix, the bearing the camera looks along, and a photo.",
-  applicationName: "Sightline",
-  appleWebApp: { capable: true, title: "Sightline", statusBarStyle: "black-translucent" },
+  applicationName: "Project ANPR",
+  appleWebApp: { capable: true, title: "Project ANPR", statusBarStyle: "black-translucent" },
 };
 
 export const viewport: Viewport = {
@@ -45,7 +45,7 @@ export const viewport: Viewport = {
 const THEME_SCRIPT = `
 (function () {
   try {
-    var stored = localStorage.getItem('sightline:theme');
+    var stored = localStorage.getItem('anpr:theme');
     var dark = stored ? stored === 'dark' : true;
     document.documentElement.classList.toggle('dark', dark);
     document.documentElement.classList.toggle('light', !dark);

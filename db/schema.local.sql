@@ -1,5 +1,5 @@
 -- ===========================================================================
--- Sightline — self-hosted Postgres setup
+-- Project ANPR — self-hosted Postgres setup
 --
 -- The local twin of supabase/schema.sql, for a Postgres server you run
 -- yourself (a VPS, a container, your laptop). Differences from the Supabase

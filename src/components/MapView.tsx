@@ -38,7 +38,7 @@ const FALLBACK_VIEW: L.LatLngTuple = [43.6532, -79.3832];
 const FALLBACK_ZOOM = 13;
 
 /** Last map centre + zoom, so a return visit opens where you left off. */
-const VIEW_KEY = "sightline:view";
+const VIEW_KEY = "anpr:view";
 
 type StoredView = { lat: number; lng: number; zoom: number };
 

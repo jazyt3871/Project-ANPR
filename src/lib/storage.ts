@@ -229,7 +229,7 @@ export function photoUrl(key: string): string {
  * submitters for rate limiting without being a durable identifier.
  */
 export function submitterHash(ip: string, userAgent: string): string {
-  const salt = process.env.SUBMITTER_SALT ?? "sightline";
+  const salt = process.env.SUBMITTER_SALT ?? "project-anpr";
   return createHash("sha256")
     .update(`${salt}|${ip}|${userAgent}`)
     .digest("hex")

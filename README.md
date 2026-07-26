@@ -1,4 +1,4 @@
-# Sightline
+# Project ANPR
 
 A crowdsourced map of camera locations. Each submission is three things measured
 from the street: a GPS fix, the bearing the lens looks along, and a photo.
@@ -18,11 +18,11 @@ Mobile-first, dark by default, no account required.
 
 Two backends, same app:
 
-- **Self-hosted** — a Postgres you run and photos on the server's disk. One
-  command on a fresh Ubuntu box: see
+- **Self-hosted (the default)** — Postgres on the same machine, photos on its
+  disk, the site on port 3000. One command on a fresh Ubuntu box: see
   [Self-hosting on a VPS](#self-hosting-on-a-vps).
-- **Supabase** — managed Postgres plus Storage, no database to administer.
-  One SQL script plus four environment variables.
+- **Supabase** — managed Postgres plus Storage, nothing to administer. One SQL
+  script plus four environment variables.
 
 Nothing in `src/` differs between the two; the choice is `STORAGE_DRIVER` and a
 connection string.
@@ -45,9 +45,9 @@ Needs a Postgres server with PostGIS on the machine (`sudo apt install
 postgresql postgresql-16-postgis-3`, `brew install postgresql postgis`).
 
 ```bash
-sudo -u postgres createuser --pwprompt sightline
-sudo -u postgres createdb --owner sightline sightline
-sudo -u postgres psql -d sightline -c 'create extension postgis'
+sudo -u postgres createuser --pwprompt anpr
+sudo -u postgres createdb --owner anpr anpr
+sudo -u postgres psql -d anpr -c 'create extension postgis'
 
 cp .env.example .env        # uncomment the self-hosted block, set the password
 psql "$DATABASE_URL" -f db/schema.local.sql
@@ -124,26 +124,32 @@ npm start                   # serves on :3000
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run db:push` | ⚠️ Drops the `location` geometry column — see the warning above. Edit `supabase/schema.sql` or `db/schema.local.sql` instead. |
 | `npm run db:local` | Applies `db/schema.local.sql` to `$DATABASE_URL` (self-hosted setup) |
-| `npm run db:seed` | Inserts sample cameras; idempotent, safe to re-run |
+| `npm run db:seed` | Inserts sample cameras; reads `.env` itself, idempotent, safe to re-run |
 | `npm run db:studio` | Prisma Studio, to browse rows |
 
 ### Verified state
 
 `npm run typecheck`, `npm run lint`, and `next build` all pass clean on the
-pinned versions below. Bundle for the map page: **119 kB** first-load JS.
+pinned versions below. Bundle for the map page: **120 kB** first-load JS.
 
-The build completes with no database reachable, which is what keeps Vercel's
-build step from depending on Supabase. With unset credentials the page still
-renders and the API returns `503` with a plain message rather than a stack
-trace — so a missing `DATABASE_URL` on a first deploy looks like a broken map,
-not a crashed app.
+The self-hosted path has been exercised end to end against a live Postgres 16:
+`db/schema.local.sql` applied, `npm run db:seed` inserted its eight cameras and
+wrote their photos to `UPLOAD_DIR`, and `npm start` on port 3000 served the
+page, `GET /api/cameras?bbox=...`, and `GET /api/photos/<key>`. The one part
+not covered is PostGIS itself — no `postgis` package was reachable in that
+environment, so the `create extension`, geometry column and GiST index lines
+ran in a stubbed form. They are unchanged from `supabase/schema.sql`.
 
-`db/schema.local.sql` has been applied to a live Postgres 16 (its PostGIS
-statements excepted — no PostGIS package was reachable in that environment).
 `supabase/schema.sql` has **not** been executed against a live Postgres in this
 repo's checks — verify it by running it once in a scratch Supabase project
 before pointing production at it. `scripts/vps-setup.sh` passes `bash -n` and
 its `--check` path, but has not been run end to end on a fresh VPS.
+
+The build completes with no database reachable, which is what keeps a CI build
+from depending on the database. With unset credentials the page still renders
+and the API returns `503` with a plain message rather than a stack trace — so a
+missing `DATABASE_URL` on a first deploy looks like a broken map, not a crashed
+app.
 
 ---
 
@@ -257,7 +263,7 @@ shots don't land sideways.
 | `UPLOAD_DIR` | `./storage/uploads` | Where the `local` driver writes. Must be on persistent storage in production. |
 | `MAX_UPLOAD_BYTES` | `8388608` | Rejected above this with `413` |
 | `RATE_LIMIT_PER_HOUR` | `20` | Submissions per IP |
-| `SUBMITTER_SALT` | `sightline` | Salt for the coarse submitter tag |
+| `SUBMITTER_SALT` | `project-anpr` | Salt for the coarse submitter tag |
 
 ---
 
@@ -309,76 +315,89 @@ the object key rather than a URL.
 
 ## Self-hosting on a VPS
 
-[`scripts/vps-setup.sh`](scripts/vps-setup.sh) takes a bare Ubuntu 22.04 or
-24.04 box to a running Sightline: local Postgres with PostGIS, photos on disk,
-the app under systemd behind nginx, and a firewall open on exactly the ports it
-needs.
+Everything on one box: Postgres with PostGIS, photos on local disk, and the
+site served on port 3000. Nothing external, no managed services.
+
+[`scripts/vps-setup.sh`](scripts/vps-setup.sh) does all of it on a bare Ubuntu
+22.04 or 24.04 server.
 
 ```bash
-git clone <your-fork> /opt/sightline && cd /opt/sightline
+git clone <your-fork> /opt/project-anpr && cd /opt/project-anpr
 
-./scripts/vps-setup.sh --check          # what's installed, what's missing; changes nothing
+./scripts/vps-setup.sh --check     # what's installed, what's missing; changes nothing
 
-sudo ./scripts/vps-setup.sh --domain cameras.example.com --email you@example.com
+sudo ./scripts/vps-setup.sh        # site on http://<server-ip>:3000
 ```
-
-Point the domain's A record at the server **before** running it, or certbot has
-nothing to validate. Without `--domain` it serves on the bare IP over HTTP.
 
 What it does, in order — each step skipped if already done, so re-running after
 a `git pull` is the redeploy:
 
-1. **Checks dependencies** and installs what's missing: Node (NodeSource
-   22.x by default, only if the system Node is older than 20), Postgres +
-   `postgresql-<ver>-postgis-3`, nginx, ufw, git, openssl, certbot.
-2. **Creates the role, database and extensions**, then applies
+1. **Checks dependencies** and installs what's missing: Node (NodeSource 22.x,
+   only if the system Node is older than 20), Postgres +
+   `postgresql-<ver>-postgis-3`, ufw, git, openssl.
+2. **Creates the role, database and extensions** (`anpr`/`anpr`), then applies
    `db/schema.local.sql`.
 3. **Writes `.env`** with the connection string, `STORAGE_DRIVER=local`, a
    generated `SUBMITTER_SALT` and a generated database password — `chmod 600`,
    owned by the service account. On a re-run it rewrites only the four lines it
    owns and reuses the existing password, so hand-edited limits survive.
-4. **Creates the `sightline` system user**, `npm ci`, `prisma generate`,
+4. **Creates the `anpr` system user**, `npm ci`, `prisma generate`,
    `next build`.
-5. **Installs `sightline.service`** — `Restart=always`, `NoNewPrivileges`,
-   `ProtectSystem=full`, `ReadWritePaths` limited to the upload directory.
-6. **Configures nginx** as a reverse proxy with `client_max_body_size` derived
-   from `MAX_UPLOAD_BYTES` (uploads 413 at the proxy otherwise) and
-   `X-Forwarded-For`, which the rate limiter keys on.
-7. **Configures ufw**: deny incoming by default, then 22, 80 and 443.
-8. **Requests a certificate** with `certbot --nginx --redirect`; renewal is
-   `certbot.timer`.
+5. **Installs `project-anpr.service`** — `Restart=always`, `NoNewPrivileges`,
+   `ProtectSystem=full`, `ReadWritePaths` limited to the upload directory. It
+   binds `0.0.0.0:3000` and is the only public listener.
+6. **Configures ufw**: deny incoming by default, then 22 and 3000.
 
 ### Ports
 
 | Port | Open to | Why |
 | --- | --- | --- |
 | 22 | world | SSH. Restrict it to your own address if you can: `ufw allow from <ip> to any port 22`. |
-| 80 | world | HTTP, redirected to 443 once a certificate exists. Also ACME renewals. |
-| 443 | world | HTTPS. **The capture flow needs it** — `navigator.geolocation` and the compass are unavailable on insecure origins. |
-| 3000 | nobody | Next.js binds `127.0.0.1`; nginx is the only public listener. Opened only with `--no-nginx`. |
-| 5432 | nobody | Postgres keeps its default `listen_addresses='localhost'`. Nothing off-box needs it. |
+| 3000 | world | The site. `--port <n>` moves it, and the firewall rule follows. |
+| 5432 | nobody | Postgres keeps its default `listen_addresses='localhost'` — the app reaches it over the loopback interface, nothing off-box needs it. |
+| 80 / 443 | nobody | Only opened with `--nginx`, below. |
 
 ### Operating it
 
 ```bash
-journalctl -u sightline -f            # logs
-systemctl restart sightline           # restart
-sudo -u postgres psql sightline       # database
-ls /opt/sightline/storage/uploads     # photos
+journalctl -u project-anpr -f          # logs
+systemctl restart project-anpr         # restart
+sudo -u postgres psql anpr             # database
+ls /opt/project-anpr/storage/uploads   # photos
 
-cd /opt/sightline && git pull && sudo ./scripts/vps-setup.sh   # redeploy
+cd /opt/project-anpr && git pull && sudo ./scripts/vps-setup.sh   # redeploy
 ```
 
-Two things worth backing up: the database (`pg_dump sightline`) and
-`UPLOAD_DIR`. Losing either alone leaves rows pointing at missing photos or
-photos with no rows.
+Two things worth backing up: the database (`pg_dump anpr`) and `UPLOAD_DIR`.
+Losing either alone leaves rows pointing at missing photos, or photos with no
+rows.
+
+### If you want a domain and HTTPS
+
+Serving on `http://<ip>:3000` is fine for browsing the map, but **the capture
+flow will not work on a phone**: `navigator.geolocation` and
+`DeviceOrientationEvent` are unavailable outside a secure context, and a bare
+IP over HTTP is not one. When you want that, point a domain's A record at the
+server and re-run with nginx in front:
+
+```bash
+sudo ./scripts/vps-setup.sh --nginx --domain anpr.example.com --email you@example.com
+```
+
+That adds an nginx reverse proxy (with `client_max_body_size` derived from
+`MAX_UPLOAD_BYTES`, and `X-Forwarded-For` so the rate limiter still sees real
+client addresses), moves the app back to `127.0.0.1`, opens 80/443 instead of
+3000, and requests a Let's Encrypt certificate with `certbot --nginx
+--redirect`. Renewal is `certbot.timer`.
 
 ### Flags
 
 `--port`, `--db-name`, `--db-user`, `--db-password`, `--upload-dir`,
-`--node-major`, `--seed`, `--no-nginx` (expose the app port directly),
-`--no-firewall` (if you manage rules elsewhere), `--no-build`, `--check`.
-`--help` lists them all.
+`--node-major`, `--seed`, `--nginx`, `--domain`, `--email`, `--no-firewall`
+(if you manage rules elsewhere), `--no-build`, `--check`. `--help` lists them
+all.
+
+---
 
 ## Deploying to Vercel
 
@@ -392,9 +411,9 @@ Supabase dashboard → **SQL Editor** → paste all of
 ```bash
 git init
 git add .
-git commit -m "Sightline"
-gh repo create sightline --private --source=. --push
-# or: git remote add origin git@github.com:<you>/sightline.git && git push -u origin main
+git commit -m "Project ANPR"
+gh repo create project-anpr --private --source=. --push
+# or: git remote add origin git@github.com:<you>/project-anpr.git && git push -u origin main
 ```
 
 `.env` is gitignored — confirm with `git status` that it is not staged before
@@ -468,12 +487,12 @@ CMD ["npm", "start"]
 ```
 
 ```bash
-docker build -t sightline .
+docker build -t project-anpr .
 docker run -p 3000:3000 \
   -e DATABASE_URL="postgresql://..." \
   -e SUBMITTER_SALT="$(openssl rand -hex 32)" \
-  -v sightline-uploads:/app/storage \
-  sightline
+  -v anpr-uploads:/app/storage \
+  project-anpr
 ```
 
 Run `npx prisma db push` once against the production database before first boot.

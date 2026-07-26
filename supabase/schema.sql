@@ -1,5 +1,5 @@
 -- ===========================================================================
--- Sightline — complete Supabase setup
+-- Project ANPR — complete Supabase setup
 --
 -- Paste this whole file into the Supabase SQL Editor and press Run. It is
 -- idempotent: running it twice is harmless.

@@ -1,4 +1,4 @@
-// Sightline — data model
+// Project ANPR — data model
 //
 // The database is Supabase Postgres with PostGIS. Everything this file declares
 // is also declared in supabase/schema.sql, which is the one-click setup script

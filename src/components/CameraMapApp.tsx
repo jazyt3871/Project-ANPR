@@ -19,7 +19,7 @@ const MapView = dynamic(() => import("@/components/MapView"), {
 });
 
 const BBOX_DEBOUNCE_MS = 350;
-const THEME_KEY = "sightline:theme";
+const THEME_KEY = "anpr:theme";
 
 export function CameraMapApp() {
   /* Merged store: panning away and back shouldn't make markers blink out. */
@@ -216,7 +216,7 @@ export function CameraMapApp() {
               className="readout text-[0.8125rem] font-semibold tracking-[0.2em] text-ink"
               style={{ letterSpacing: "0.2em" }}
             >
-              SIGHTLINE
+              PROJECT ANPR
             </span>
           </span>
 
