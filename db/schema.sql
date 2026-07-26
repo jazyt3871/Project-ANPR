@@ -3,7 +3,7 @@
 --
 -- Postgres with PostGIS, running on the same machine as the app. Apply it with
 --   psql "$DATABASE_URL" -f db/schema.sql
--- or let scripts/vps-setup.sh do it for you. Idempotent — re-running is
+-- or let scripts/install-linux.sh do it for you. Idempotent — re-running is
 -- harmless.
 --
 -- There is no row-level security here: nothing but the app's own role ever

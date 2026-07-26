@@ -15,21 +15,21 @@
   is absent, which is the normal case on Windows.
 
 .EXAMPLE
-  .\scripts\windows-setup.ps1
+  .\scripts\install-windows.ps1
   Install, set up the database, build. Then `npm start`.
 
 .EXAMPLE
-  .\scripts\windows-setup.ps1 -Check
+  .\scripts\install-windows.ps1 -Check
   Report what is installed and what is missing. Changes nothing.
 
 .EXAMPLE
-  .\scripts\windows-setup.ps1 -Tunnel -Domain anpr.example.com
+  .\scripts\install-windows.ps1 -Tunnel -Domain anpr.example.com
   As above, then print the exact cloudflared commands for that hostname.
 
 .NOTES
   Run from an ordinary PowerShell window -- winget will prompt for elevation
   by itself when it needs it. If script execution is blocked, either:
-     powershell -ExecutionPolicy Bypass -File .\scripts\windows-setup.ps1
+     powershell -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1
   or unblock this repo once:
      Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 #>
@@ -245,7 +245,7 @@ if (Test-Path $EnvFile) {
 } else {
   $salt = -join ((48..57) + (97..102) | Get-Random -Count 64 | ForEach-Object { [char]$_ })
   @"
-# Written by scripts\windows-setup.ps1
+# Written by scripts\install-windows.ps1
 
 # Postgres on this machine, over the loopback interface.
 DATABASE_URL="$databaseUrl"
@@ -344,7 +344,7 @@ Project ANPR is set up.
   database        psql -U $DbUser -h 127.0.0.1 $DbName
 
   Rebuild after a git pull:
-    git pull; .\scripts\windows-setup.ps1
+    git pull; .\scripts\install-windows.ps1
 
   Note: the GPS and compass steps need HTTPS. On http://localhost they work
   fine, but over your LAN or a plain-HTTP address they do not -- which is what

@@ -6,10 +6,10 @@
 # this one server and nothing off it — Postgres with PostGIS, photos on local
 # disk, the site itself served on port 3000.
 #
-#   sudo ./scripts/vps-setup.sh                  # site on http://<server-ip>:3000
-#   sudo ./scripts/vps-setup.sh --port 8080      # a different port
-#   sudo ./scripts/vps-setup.sh --nginx --domain anpr.example.com --email you@example.com
-#   ./scripts/vps-setup.sh --check               # dependency report, changes nothing
+#   sudo ./scripts/install-linux.sh                  # site on http://<server-ip>:3000
+#   sudo ./scripts/install-linux.sh --port 8080      # a different port
+#   sudo ./scripts/install-linux.sh --nginx --domain anpr.example.com --email you@example.com
+#   ./scripts/install-linux.sh --check               # dependency report, changes nothing
 #
 # Idempotent: safe to re-run after a `git pull` to rebuild and restart.
 # ===========================================================================
@@ -334,7 +334,7 @@ if [[ -f "$ENV_FILE" ]]; then
   ok "updated existing .env"
 else
   cat > "$ENV_FILE" <<EOF
-# Written by scripts/vps-setup.sh — self-hosted Sightline.
+# Written by scripts/install-linux.sh — self-hosted Sightline.
 
 # Postgres on this machine, over the loopback interface.
 DATABASE_URL="${DATABASE_URL}"
@@ -546,7 +546,7 @@ ${GREEN}${BOLD}Project ANPR is up.${RESET}  ${BOLD}${URL}${RESET}
   env         ${ENV_FILE}  (mode 600, owned by ${APP_USER})
 
   Redeploy after a git pull:
-    cd ${APP_DIR} && git pull && sudo ./scripts/vps-setup.sh
+    cd ${APP_DIR} && git pull && sudo ./scripts/install-linux.sh
 
   Note: the GPS and compass steps need a secure context in the browser. Over
   plain HTTP on an IP address they will not work — for phone capture, run with

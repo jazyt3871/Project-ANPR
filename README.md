@@ -109,8 +109,11 @@ the extension, geometry column, trigger and GiST index — is unchanged from
 what shipped before, but no `postgis` package was reachable here, so it
 remains unexecuted in these checks.
 
-`scripts/vps-setup.sh` passes `bash -n` and its `--check` path, but has not
-been run end to end on a fresh VPS. `scripts/windows-setup.ps1` has been
+`scripts/install-linux.sh` passes `bash -n` and its `--check` path, and
+`scripts/start-linux.sh` was run end to end against a live build and database
+— production mode, dev mode, and its two guard rails (missing `.env`, missing
+build) all behave as documented. Neither has been exercised on a fresh VPS.
+`scripts/install-windows.ps1` and `scripts/start-windows.ps1` have been
 reviewed but not executed — no PowerShell or Windows machine was available in
 these checks.
 
@@ -289,15 +292,15 @@ returning a real URL is how a driver opts out of streaming through the app.
 Everything on one box: Postgres with PostGIS, photos on local disk, and the
 site served on port 3000. Nothing external, no managed services.
 
-[`scripts/vps-setup.sh`](scripts/vps-setup.sh) does all of it on a bare Ubuntu
+[`scripts/install-linux.sh`](scripts/install-linux.sh) does all of it on a bare Ubuntu
 22.04 or 24.04 server.
 
 ```bash
 git clone <your-fork> /opt/project-anpr && cd /opt/project-anpr
 
-./scripts/vps-setup.sh --check     # what's installed, what's missing; changes nothing
+./scripts/install-linux.sh --check     # what's installed, what's missing; changes nothing
 
-sudo ./scripts/vps-setup.sh        # site on http://<server-ip>:3000
+sudo ./scripts/install-linux.sh        # site on http://<server-ip>:3000
 ```
 
 What it does, in order — each step skipped if already done, so re-running after
@@ -336,7 +339,7 @@ systemctl restart project-anpr         # restart
 sudo -u postgres psql anpr             # database
 ls /opt/project-anpr/storage/uploads   # photos
 
-cd /opt/project-anpr && git pull && sudo ./scripts/vps-setup.sh   # redeploy
+cd /opt/project-anpr && git pull && sudo ./scripts/install-linux.sh   # redeploy
 ```
 
 Two things worth backing up: the database (`pg_dump anpr`) and `UPLOAD_DIR`.
@@ -352,7 +355,7 @@ IP over HTTP is not one. When you want that, point a domain's A record at the
 server and re-run with nginx in front:
 
 ```bash
-sudo ./scripts/vps-setup.sh --nginx --domain anpr.example.com --email you@example.com
+sudo ./scripts/install-linux.sh --nginx --domain anpr.example.com --email you@example.com
 ```
 
 That adds an nginx reverse proxy (with `client_max_body_size` derived from
@@ -368,6 +371,24 @@ client addresses), moves the app back to `127.0.0.1`, opens 80/443 instead of
 (if you manage rules elsewhere), `--no-build`, `--check`. `--help` lists them
 all.
 
+### On a Linux box without systemd
+
+`install-linux.sh` installs `project-anpr.service` so the site survives a
+reboot, which is what you want on a real server. If you're instead running
+this on a Linux desktop, in a container, or anywhere else you don't want a
+systemd unit, [`scripts/start-linux.sh`](scripts/start-linux.sh) is a plain
+foreground launcher — it does no installing or configuring, just checks `.env`
+and a build exist and runs the server:
+
+```bash
+./scripts/start-linux.sh            # production server on :3000
+./scripts/start-linux.sh --dev      # dev server, hot reload
+PORT=8080 ./scripts/start-linux.sh  # a different port
+```
+
+It refuses to start a second copy if `project-anpr.service` is already
+running under systemd, so the two paths don't collide.
+
 ---
 
 ## Running it from a Windows PC
@@ -382,13 +403,13 @@ real HTTPS, so the capture flow works.
 git clone https://github.com/jazyt3871/Project-ANPR.git
 cd Project-ANPR
 
-.\scripts\windows-setup.ps1 -Check        # what's installed; changes nothing
+.\scripts\install-windows.ps1 -Check        # what's installed; changes nothing
 
-.\scripts\windows-setup.ps1 -Seed         # install, database, build
-npm start                                 # http://localhost:3000
+.\scripts\install-windows.ps1 -Seed         # install, database, build
+.\scripts\start-windows.ps1                # http://localhost:3000
 ```
 
-[`scripts\windows-setup.ps1`](scripts/windows-setup.ps1) installs Node and
+[`scripts\install-windows.ps1`](scripts/install-windows.ps1) installs Node and
 PostgreSQL with winget where they're missing, creates the role and database,
 applies `db/schema.sql`, writes `.env` with a generated password and salt,
 and builds. Re-running it after a `git pull` rebuilds in place and reuses the
@@ -408,7 +429,7 @@ Add your domain to Cloudflare first (at
 pointing your registrar's nameservers at them). Then:
 
 ```powershell
-.\scripts\windows-setup.ps1 -Tunnel -Domain anpr.example.com
+.\scripts\install-windows.ps1 -Tunnel -Domain anpr.example.com
 ```
 
 which installs `cloudflared` and prints the commands for your hostname:
@@ -418,18 +439,30 @@ cloudflared tunnel login
 cloudflared tunnel create project-anpr
 cloudflared tunnel route dns project-anpr anpr.example.com
 
-# leave running, alongside `npm start`
+# leave running, alongside .\scripts\start-windows.ps1
 cloudflared tunnel run --url http://localhost:3000 project-anpr
 ```
 
 Certificates are handled by Cloudflare; there's no certbot step.
 
+### Starting it again later
+
+[`scripts\start-windows.ps1`](scripts/start-windows.ps1) is the lightweight
+counterpart to `install-windows.ps1` — no installing or configuring, it just
+checks `.env` and a build exist and starts the server:
+
+```powershell
+.\scripts\start-windows.ps1            # production server on :3000
+.\scripts\start-windows.ps1 -Dev       # dev server, hot reload
+.\scripts\start-windows.ps1 -Port 8080 # a different port
+```
+
 ### Keeping it up
 
-Two things have to stay running: `npm start` and the tunnel. For a permanent
-setup, install both as Windows services rather than leaving terminals open —
-`cloudflared service install` does the tunnel, and
-[NSSM](https://nssm.cc/) is the usual way to wrap `npm start`.
+Two things have to stay running: `start-windows.ps1` and the tunnel. For a
+permanent setup, install both as Windows services rather than leaving
+terminals open — `cloudflared service install` does the tunnel, and
+[NSSM](https://nssm.cc/) is the usual way to wrap a script like this one.
 
 Worth being honest about the trade-off: a home PC means the site is up only
 while that machine is on and your internet is up, and sustained public traffic
@@ -546,7 +579,7 @@ Apply `db/schema.sql` to that database once before first boot.
 - [ ] HTTPS terminated — the sensors do not work without it
 - [ ] A moderation path exists (see [Not included](#not-included))
 
-`scripts/vps-setup.sh` handles the first three.
+`scripts/install-linux.sh` handles the first three.
 
 ---
 
@@ -561,8 +594,10 @@ prisma/
   schema.prisma            Postgres; Camera + RateLimitHit models
 scripts/
   seed.mjs                 Eight sample cameras + an embedded placeholder JPEG
-  vps-setup.sh             Ubuntu: deps, Postgres, systemd, nginx, ufw, TLS
-  windows-setup.ps1        Windows: deps, Postgres, .env, build, Cloudflare Tunnel
+  install-linux.sh          Ubuntu: deps, Postgres, systemd, nginx, ufw, TLS
+  start-linux.sh            Foreground launcher for a Linux box without systemd
+  install-windows.ps1       Windows: deps, Postgres, .env, build, Cloudflare Tunnel
+  start-windows.ps1         Launcher: checks .env/build exist, runs the server
   fly-db-setup.sh          postgis/postgis as a Fly Machine, for fly.toml above
 src/
   app/
