@@ -18,9 +18,27 @@
 -- is the migration tool for this project; Prisma is only the query client.
 -- ===========================================================================
 
-create extension if not exists postgis;
 -- gen_random_uuid() is built in from Postgres 13; pgcrypto covers older servers.
 create extension if not exists pgcrypto;
+
+-- PostGIS is optional, and this is the only place that decides so. Nothing the
+-- app runs today needs it: GET /api/cameras filters on the latitude/longitude
+-- scalars, and there is no $queryRaw anywhere. The geometry column exists for
+-- radius and nearest-neighbour queries later (worked examples at the bottom of
+-- this file), so where the extension is available it is still created and kept
+-- in sync — but a server without it gets a working database rather than an
+-- error. That is what makes a stock Windows Postgres usable, where installing
+-- PostGIS means a separate Stack Builder run.
+do $$
+begin
+  if exists (select 1 from pg_available_extensions where name = 'postgis') then
+    create extension if not exists postgis;
+  else
+    raise notice 'postgis not available — skipping the location column and its index.';
+    raise notice 'Everything the app uses today works without it.';
+  end if;
+end
+$$;
 
 set search_path = public, pg_catalog;
 
@@ -54,8 +72,8 @@ create table if not exists public.cameras (
   -- Coarse, non-reversible submitter tag, for rate limiting only
   submitter_hash text,
 
-  -- Maintained by the trigger below; never written by the application
-  location       geometry(Point, 4326),
+  -- NOTE: the `location` geometry(Point, 4326) column is added by the block
+  -- below rather than declared here, because it exists only where PostGIS does.
 
   constraint cameras_latitude_range  check (latitude  between  -90 and  90),
   constraint cameras_longitude_range check (longitude between -180 and 180),
@@ -63,31 +81,47 @@ create table if not exists public.cameras (
   constraint cameras_heading_source  check (heading_source in ('sensor', 'manual'))
 );
 
--- Keep `location` in sync with latitude/longitude so the app only ever writes
--- the two scalars and spatial queries still work. The search_path is pinned
--- rather than inherited: a trigger that resolves st_* through the caller's
--- path is a function-hijacking vector.
-create or replace function public.cameras_sync_location() returns trigger
-  language plpgsql
-  set search_path = public, pg_catalog
-as $$
+-- The geometry column, its sync trigger and its spatial index — all of it only
+-- where PostGIS is installed. Everything here is `if not exists` or `or
+-- replace`, so this re-runs cleanly, including on a database that gained
+-- PostGIS after the tables were first created.
+do $$
 begin
-  new.location := st_setsrid(st_makepoint(new.longitude, new.latitude), 4326);
-  return new;
-end;
+  if not exists (select 1 from pg_extension where extname = 'postgis') then
+    return;
+  end if;
+
+  alter table public.cameras
+    add column if not exists location geometry(Point, 4326);
+
+  -- Keep `location` in sync with latitude/longitude so the app only ever
+  -- writes the two scalars and spatial queries still work. The search_path is
+  -- pinned rather than inherited: a trigger that resolves st_* through the
+  -- caller's path is a function-hijacking vector.
+  create or replace function public.cameras_sync_location() returns trigger
+    language plpgsql
+    set search_path = public, pg_catalog
+  as $fn$
+  begin
+    new.location := st_setsrid(st_makepoint(new.longitude, new.latitude), 4326);
+    return new;
+  end;
+  $fn$;
+
+  drop trigger if exists cameras_sync_location_trg on public.cameras;
+  create trigger cameras_sync_location_trg
+    before insert or update of latitude, longitude on public.cameras
+    for each row execute function public.cameras_sync_location();
+
+  -- Backfill anything inserted before the trigger existed
+  update public.cameras
+     set location = st_setsrid(st_makepoint(longitude, latitude), 4326)
+   where location is null;
+
+  create index if not exists cameras_location_gist on public.cameras using gist (location);
+end
 $$;
 
-drop trigger if exists cameras_sync_location_trg on public.cameras;
-create trigger cameras_sync_location_trg
-  before insert or update of latitude, longitude on public.cameras
-  for each row execute function public.cameras_sync_location();
-
--- Backfill anything inserted before the trigger existed
-update public.cameras
-   set location = st_setsrid(st_makepoint(longitude, latitude), 4326)
- where location is null;
-
-create index if not exists cameras_location_gist on public.cameras using gist (location);
 create index if not exists cameras_created_at_idx on public.cameras (created_at desc);
 -- Backs the bounding-box scan in GET /api/cameras, which filters on the two
 -- scalars rather than the geometry so it works without a PostGIS-aware query.

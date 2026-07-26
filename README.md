@@ -14,13 +14,14 @@ Mobile-first, dark by default, no account required.
 | **Node.js** | **20.9+ or 22+** | Next.js 15 dropped Node 18. Check with `node -v`. |
 | npm | 10+ | Ships with Node. pnpm and yarn both work. |
 | A phone | iOS 13+ / Android 8+ | The GPS and compass steps cannot be exercised on a desktop — see [Testing the sensors](#testing-the-sensors). |
-| Postgres | **14+, with PostGIS 3** | On the same machine as the app. Set up by [`db/schema.sql`](db/schema.sql). |
+| Postgres | **14+** | On the same machine as the app. Set up by [`db/schema.sql`](db/schema.sql). PostGIS is used if present but not required — see [The database](#the-database). |
 
 Everything runs on one box and nothing off it: Postgres for the rows, the
 server's own disk for the photos, and the site on port 3000. No managed
-services, no third-party account, no data leaving the machine. One command on a
-fresh Ubuntu server sets all of it up — see
-[Self-hosting on a VPS](#self-hosting-on-a-vps).
+services, no third-party account, no data leaving the machine. One command
+sets all of it up, on [an Ubuntu server](#self-hosting-on-a-vps) or on
+[a Windows PC](#running-it-from-a-windows-pc). There is also a free
+[Fly.io](#deploying-to-flyio-free-tier) path.
 
 Two things reach the network **at build time**, which matters in locked-down CI:
 
@@ -34,16 +35,16 @@ Both have offline workarounds; see [Building offline](#building-offline).
 
 ## Quick start
 
-Postgres with PostGIS has to be on the machine (`sudo apt install postgresql
-postgresql-16-postgis-3`, or `brew install postgresql postgis`). On a server,
-skip all of this and run [`scripts/vps-setup.sh`](scripts/vps-setup.sh), which
-does every step below for you — see
-[Self-hosting on a VPS](#self-hosting-on-a-vps).
+Postgres has to be on the machine (`sudo apt install postgresql
+postgresql-16-postgis-3`, or `brew install postgresql postgis` — the postgis
+package is optional, see below). Rather than doing any of this by hand, there
+is a one-command setup for [Ubuntu](#self-hosting-on-a-vps) and for
+[Windows](#running-it-from-a-windows-pc).
 
 ```bash
 sudo -u postgres createuser --pwprompt anpr
 sudo -u postgres createdb --owner anpr anpr
-sudo -u postgres psql -d anpr -c 'create extension postgis'
+sudo -u postgres psql -d anpr -c 'create extension postgis'   # optional
 
 cp .env.example .env        # set the password you just chose
 psql "$DATABASE_URL" -f db/schema.sql
@@ -57,10 +58,11 @@ npm run dev
 Open <http://localhost:3000>. If you seeded, pan to downtown Toronto to see the
 markers.
 
-[`db/schema.sql`](db/schema.sql) enables PostGIS, creates the `cameras` table
-with its `location` geometry column and spatial index, and creates the
-rate-limit table. It is idempotent — re-running it is harmless. Photos are
-written to `UPLOAD_DIR` and served by `/api/photos`.
+[`db/schema.sql`](db/schema.sql) creates the `cameras` table, the rate-limit
+table, and — where PostGIS is available — the `location` geometry column with
+its trigger and spatial index. It is idempotent, and re-running it on a
+database that has since gained PostGIS adds the geometry parts to the existing
+table. Photos are written to `UPLOAD_DIR` and served by `/api/photos`.
 
 > **Do not run `prisma db push` here.** `db/schema.sql` already created
 > everything, and Prisma has no geometry type — so `location` is absent from
@@ -99,14 +101,18 @@ pinned versions below. Bundle for the map page: **120 kB** first-load JS.
 The self-hosted path has been exercised end to end against a live Postgres 16:
 `db/schema.sql` applied, `npm run db:seed` inserted its eight cameras and
 wrote their photos to `UPLOAD_DIR`, and `npm start` on port 3000 served the
-page, `GET /api/cameras?bbox=...`, and `GET /api/photos/<key>`. The one part
-not covered is PostGIS itself — no `postgis` package was reachable in that
-environment, so the `create extension`, geometry column and GiST index lines
-ran in a stubbed form — they are the standard PostGIS incantations, but they
-have not been executed here.
+page, `GET /api/cameras?bbox=...`, and `GET /api/photos/<key>`. That run was on a Postgres **without** PostGIS, which is now a supported
+configuration rather than a stub: the schema's detection block skipped the
+geometry column, the seed and the full upload/read round trip worked anyway,
+and re-applying the schema was clean. The PostGIS branch of that block —
+the extension, geometry column, trigger and GiST index — is unchanged from
+what shipped before, but no `postgis` package was reachable here, so it
+remains unexecuted in these checks.
 
 `scripts/vps-setup.sh` passes `bash -n` and its `--check` path, but has not
-been run end to end on a fresh VPS.
+been run end to end on a fresh VPS. `scripts/windows-setup.ps1` has been
+reviewed but not executed — no PowerShell or Windows machine was available in
+these checks.
 
 The `next build`'s standalone output (what `Dockerfile` and Fly ship) has been
 run directly — `node .next/standalone/server.js` against the same live
@@ -228,22 +234,28 @@ shots don't land sideways.
 
 ## The database
 
-Postgres with PostGIS. [`db/schema.sql`](db/schema.sql) is the source of truth
-for everything Prisma cannot express — the extension, the `location` geometry
-column with its sync trigger and GiST index, and the check constraints.
-`prisma/schema.prisma` declares the same table with `@map()` so the TypeScript
-field names (`lat`, `lng`) stay readable while the columns are `latitude`,
-`longitude`.
+Postgres. [`db/schema.sql`](db/schema.sql) is the source of truth for
+everything Prisma cannot express — the `location` geometry column with its sync
+trigger and GiST index, and the check constraints. `prisma/schema.prisma`
+declares the same table with `@map()` so the TypeScript field names (`lat`,
+`lng`) stay readable while the columns are `latitude`, `longitude`.
 
-Positions are stored as plain `latitude`/`longitude` floats **and** as a
-`geometry(Point, 4326)`. The bounding-box query in
-`src/app/api/cameras/route.ts` uses the scalars, so it needs no PostGIS-aware
-SQL and handles the antimeridian. The geometry is there for radius and
-nearest-neighbour queries via `$queryRaw` — worked examples are at the bottom of
-`db/schema.sql`.
+Positions are stored as plain `latitude`/`longitude` floats, and — where
+PostGIS is installed — also as a `geometry(Point, 4326)`.
+
+**PostGIS is optional.** The bounding-box query in
+`src/app/api/cameras/route.ts` filters on the two scalars, so it needs no
+PostGIS-aware SQL and handles the antimeridian; there is no `$queryRaw`
+anywhere in the app. The geometry column is there for radius and
+nearest-neighbour queries later — worked examples are at the bottom of
+`db/schema.sql` — so the schema creates it where the extension exists and
+quietly skips it where it does not. That is what lets a stock Windows Postgres
+run this unmodified. Install PostGIS afterwards and re-apply the schema file:
+it adds the column, backfills it from the existing rows, and creates the
+trigger and index.
 
 Because the trigger derives `location` from the two scalars, application writes
-never touch it.
+never touch it either way.
 
 The rate limiter lives in `rate_limit_hits` rather than in process memory, so a
 restart does not hand every submitter a fresh quota.
@@ -355,6 +367,75 @@ client addresses), moves the app back to `127.0.0.1`, opens 80/443 instead of
 `--node-major`, `--seed`, `--nginx`, `--domain`, `--email`, `--no-firewall`
 (if you manage rules elsewhere), `--no-build`, `--check`. `--help` lists them
 all.
+
+---
+
+## Running it from a Windows PC
+
+Everything on your own machine — Postgres, the photos, the app — reachable
+from the internet through a Cloudflare Tunnel. Free apart from the domain, no
+port forwarding, no public IP, no inbound firewall holes: `cloudflared` makes
+an *outbound* connection to Cloudflare and traffic comes back down it. You get
+real HTTPS, so the capture flow works.
+
+```powershell
+git clone https://github.com/jazyt3871/Project-ANPR.git
+cd Project-ANPR
+
+.\scripts\windows-setup.ps1 -Check        # what's installed; changes nothing
+
+.\scripts\windows-setup.ps1 -Seed         # install, database, build
+npm start                                 # http://localhost:3000
+```
+
+[`scripts\windows-setup.ps1`](scripts/windows-setup.ps1) installs Node and
+PostgreSQL with winget where they're missing, creates the role and database,
+applies `db/schema.sql`, writes `.env` with a generated password and salt,
+and builds. Re-running it after a `git pull` rebuilds in place and reuses the
+password already in `.env`.
+
+**PostGIS is not required here.** `db/schema.sql` checks for it and skips the
+geometry column and its index when it's absent — which is the normal case on
+Windows, where PostGIS means a separate Stack Builder run. Nothing the app
+does today touches that column (see [The database](#the-database)), so a stock
+Windows Postgres is fully functional. Install PostGIS later and re-run the
+schema file: it adds the column, trigger and index to the existing table.
+
+### Putting it on your domain
+
+Add your domain to Cloudflare first (at
+[dash.cloudflare.com](https://dash.cloudflare.com) — it walks you through
+pointing your registrar's nameservers at them). Then:
+
+```powershell
+.\scripts\windows-setup.ps1 -Tunnel -Domain anpr.example.com
+```
+
+which installs `cloudflared` and prints the commands for your hostname:
+
+```powershell
+cloudflared tunnel login
+cloudflared tunnel create project-anpr
+cloudflared tunnel route dns project-anpr anpr.example.com
+
+# leave running, alongside `npm start`
+cloudflared tunnel run --url http://localhost:3000 project-anpr
+```
+
+Certificates are handled by Cloudflare; there's no certbot step.
+
+### Keeping it up
+
+Two things have to stay running: `npm start` and the tunnel. For a permanent
+setup, install both as Windows services rather than leaving terminals open —
+`cloudflared service install` does the tunnel, and
+[NSSM](https://nssm.cc/) is the usual way to wrap `npm start`.
+
+Worth being honest about the trade-off: a home PC means the site is up only
+while that machine is on and your internet is up, and sustained public traffic
+runs through your home connection. Fine for something small; the
+[VPS](#self-hosting-on-a-vps) or [Fly](#deploying-to-flyio-free-tier) routes
+don't have that ceiling.
 
 ---
 
@@ -481,6 +562,7 @@ prisma/
 scripts/
   seed.mjs                 Eight sample cameras + an embedded placeholder JPEG
   vps-setup.sh             Ubuntu: deps, Postgres, systemd, nginx, ufw, TLS
+  windows-setup.ps1        Windows: deps, Postgres, .env, build, Cloudflare Tunnel
   fly-db-setup.sh          postgis/postgis as a Fly Machine, for fly.toml above
 src/
   app/
