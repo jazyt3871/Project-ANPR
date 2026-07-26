@@ -296,6 +296,20 @@ else
   ok "created system user ${APP_USER}"
 fi
 
+# Read the home directory back out of passwd rather than assuming the one the
+# useradd above would have chosen: when the account already existed — a login
+# user you made yourself, say — its home is wherever it already is, and npm
+# needs a HOME it can actually write its cache into.
+APP_HOME="$(getent passwd "$APP_USER" | cut -d: -f6)"
+if [[ -z "$APP_HOME" ]]; then
+  die "cannot determine the home directory of ${APP_USER}"
+fi
+if [[ ! -d "$APP_HOME" ]]; then
+  install -d -o "$APP_USER" -g "$APP_USER" -m 0755 "$APP_HOME"
+  ok "created ${APP_HOME}"
+fi
+info "home: ${APP_HOME}"
+
 install -d -o "$APP_USER" -g "$APP_USER" -m 0755 "$UPLOAD_DIR"
 ok "uploads: ${UPLOAD_DIR}"
 
@@ -349,7 +363,7 @@ if [[ $WITH_BUILD == 1 ]]; then
   # The tree now belongs to the service account, so root's later `git pull`
   # would trip git's ownership check.
   git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
-  run_as_app() { sudo -u "$APP_USER" env "HOME=/var/lib/${APP_USER}" "PATH=$PATH" "$@"; }
+  run_as_app() { sudo -u "$APP_USER" env "HOME=$APP_HOME" "PATH=$PATH" "$@"; }
 
   # npm ci is the reproducible path, but it refuses to run when the lockfile
   # has drifted from package.json; fall back rather than fail the deploy.
