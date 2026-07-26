@@ -20,7 +20,15 @@ set -euo pipefail
 # --------------------------------------------------------------------------
 APP_NAME="${APP_NAME:-project-anpr}"
 APP_PORT="${APP_PORT:-3000}"
-APP_USER="${APP_USER:-anpr}"
+# Default to whoever ran `sudo` — almost always the account that cloned the
+# repo, so the checkout is already under a home directory that account can
+# read. A fixed "anpr" system account only works cleanly when the checkout
+# lives somewhere world-traversable like /opt: a service account cannot cd
+# into someone else's $HOME even after chown'ing the checkout itself, because
+# the *parent* directories (/home/<user>) are 0750 and block it regardless.
+# --app-user overrides this for a real dedicated-account deployment.
+APP_USER="${APP_USER:-${SUDO_USER:-anpr}}"
+[[ "$APP_USER" == "root" ]] && APP_USER="anpr"
 DB_NAME="${DB_NAME:-anpr}"
 DB_USER="${DB_USER:-anpr}"
 DB_PASSWORD="${DB_PASSWORD:-}"          # generated on first run if empty
@@ -68,6 +76,8 @@ Options
                         serves plain HTTP.
   --port <n>            Port the site is served on (default 3000). Opened in
                         the firewall unless nginx is fronting it.
+  --app-user <name>     Unix account the app runs and builds as (default: the
+                        account that ran sudo, or "anpr" if run as plain root).
   --db-name <name>      Database name (default anpr).
   --db-user <name>      Database role (default anpr).
   --db-password <pw>    Role password. Generated and written to .env if omitted.
@@ -89,6 +99,7 @@ while [[ $# -gt 0 ]]; do
     --domain)       DOMAIN="${2:?--domain needs a value}"; WITH_NGINX=1; shift 2 ;;
     --email)        LETSENCRYPT_EMAIL="${2:?--email needs a value}"; shift 2 ;;
     --port)         APP_PORT="${2:?--port needs a value}"; shift 2 ;;
+    --app-user)     APP_USER="${2:?--app-user needs a value}"; shift 2 ;;
     --db-name)      DB_NAME="${2:?--db-name needs a value}"; shift 2 ;;
     --db-user)      DB_USER="${2:?--db-user needs a value}"; shift 2 ;;
     --db-password)  DB_PASSWORD="${2:?--db-password needs a value}"; shift 2 ;;
@@ -291,10 +302,12 @@ ok "schema applied and granted to ${DB_USER}"
 step "Service account and environment"
 if id -u "$APP_USER" >/dev/null 2>&1; then
   ok "user ${APP_USER} exists"
+  [[ "$APP_USER" == "${SUDO_USER:-}" ]] && info "(the account that ran sudo — reusing it avoids a second account fighting over \$HOME permissions)"
 else
   useradd --system --create-home --home-dir "/var/lib/${APP_USER}" --shell /usr/sbin/nologin "$APP_USER"
   ok "created system user ${APP_USER}"
 fi
+APP_GROUP="$(id -gn "$APP_USER")"
 
 # Read the home directory back out of passwd rather than assuming the one the
 # useradd above would have chosen: when the account already existed — a login
@@ -305,12 +318,25 @@ if [[ -z "$APP_HOME" ]]; then
   die "cannot determine the home directory of ${APP_USER}"
 fi
 if [[ ! -d "$APP_HOME" ]]; then
-  install -d -o "$APP_USER" -g "$APP_USER" -m 0755 "$APP_HOME"
+  install -d -o "$APP_USER" -g "$APP_GROUP" -m 0755 "$APP_HOME"
   ok "created ${APP_HOME}"
 fi
 info "home: ${APP_HOME}"
 
-install -d -o "$APP_USER" -g "$APP_USER" -m 0755 "$UPLOAD_DIR"
+# chown'ing $APP_DIR does not help if a *parent* directory blocks traversal —
+# e.g. --app-user set to some other account while the checkout sits under a
+# different user's 0750 $HOME. Catch that here, with a clear cause, rather
+# than three steps from now as an npm EACCES on a directory that plainly
+# already exists and is plainly already owned correctly.
+if ! sudo -u "$APP_USER" test -x "$APP_DIR" 2>/dev/null; then
+  die "user '${APP_USER}' cannot traverse into ${APP_DIR}. \
+A parent directory (likely someone else's \$HOME) is blocking it — chown'ing \
+${APP_DIR} itself will not fix that. Either run this as the account that \
+owns the checkout (drop --app-user), or move the checkout somewhere \
+world-traversable like /opt and re-clone there."
+fi
+
+install -d -o "$APP_USER" -g "$APP_GROUP" -m 0755 "$UPLOAD_DIR"
 ok "uploads: ${UPLOAD_DIR}"
 
 if [[ -f "$ENV_FILE" ]]; then
@@ -351,7 +377,7 @@ SUBMITTER_SALT="$(openssl rand -hex 32)"
 EOF
   ok "wrote ${ENV_FILE}"
 fi
-chown "$APP_USER":"$APP_USER" "$ENV_FILE"
+chown "$APP_USER":"$APP_GROUP" "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 
 # --------------------------------------------------------------------------
@@ -359,7 +385,7 @@ chmod 600 "$ENV_FILE"
 # --------------------------------------------------------------------------
 if [[ $WITH_BUILD == 1 ]]; then
   step "Installing dependencies and building"
-  chown -R "$APP_USER":"$APP_USER" "$APP_DIR"
+  chown -R "$APP_USER":"$APP_GROUP" "$APP_DIR"
   # The tree now belongs to the service account, so root's later `git pull`
   # would trip git's ownership check.
   git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
@@ -405,7 +431,7 @@ Requires=postgresql.service
 [Service]
 Type=simple
 User=${APP_USER}
-Group=${APP_USER}
+Group=${APP_GROUP}
 WorkingDirectory=${APP_DIR}
 EnvironmentFile=${ENV_FILE}
 Environment=NODE_ENV=production
