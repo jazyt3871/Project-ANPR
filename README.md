@@ -14,10 +14,18 @@ Mobile-first, dark by default, no account required.
 | **Node.js** | **20.9+ or 22+** | Next.js 15 dropped Node 18. Check with `node -v`. |
 | npm | 10+ | Ships with Node. pnpm and yarn both work. |
 | A phone | iOS 13+ / Android 8+ | The GPS and compass steps cannot be exercised on a desktop — see [Testing the sensors](#testing-the-sensors). |
-| A Supabase project | Free tier | Postgres + PostGIS for the rows, Storage for the photos. Create one at [supabase.com](https://supabase.com). |
+| Postgres | **14+, with PostGIS 3** | Either your own server (`db/schema.local.sql`) or a free [Supabase](https://supabase.com) project (`supabase/schema.sql`). |
 
-No Docker and no local database server: Supabase provides both, and the whole
-setup is one SQL script plus four environment variables.
+Two backends, same app:
+
+- **Self-hosted** — a Postgres you run and photos on the server's disk. One
+  command on a fresh Ubuntu box: see
+  [Self-hosting on a VPS](#self-hosting-on-a-vps).
+- **Supabase** — managed Postgres plus Storage, no database to administer.
+  One SQL script plus four environment variables.
+
+Nothing in `src/` differs between the two; the choice is `STORAGE_DRIVER` and a
+connection string.
 
 Two things reach the network **at build time**, which matters in locked-down CI:
 
@@ -30,6 +38,36 @@ Both have offline workarounds; see [Building offline](#building-offline).
 ---
 
 ## Quick start
+
+### Local Postgres
+
+Needs a Postgres server with PostGIS on the machine (`sudo apt install
+postgresql postgresql-16-postgis-3`, `brew install postgresql postgis`).
+
+```bash
+sudo -u postgres createuser --pwprompt sightline
+sudo -u postgres createdb --owner sightline sightline
+sudo -u postgres psql -d sightline -c 'create extension postgis'
+
+cp .env.example .env        # uncomment the self-hosted block, set the password
+psql "$DATABASE_URL" -f db/schema.local.sql
+
+npm install
+npx prisma generate
+npm run db:seed             # optional: eight sample cameras
+npm run dev
+```
+
+[`db/schema.local.sql`](db/schema.local.sql) is the self-hosted twin of the
+Supabase script: same tables, same trigger, same indexes, minus the bits that
+only exist on Supabase (the `extensions` schema, RLS, the storage bucket).
+Photos land in `UPLOAD_DIR` and are served by `/api/photos`.
+
+For a whole server rather than a laptop, skip all of the above and run
+[`scripts/vps-setup.sh`](scripts/vps-setup.sh) — see
+[Self-hosting on a VPS](#self-hosting-on-a-vps).
+
+### Supabase
 
 **1. Set up the database.** In the Supabase dashboard, open the **SQL Editor**,
 paste the entire contents of [`supabase/schema.sql`](supabase/schema.sql), and
@@ -84,7 +122,8 @@ npm start                   # serves on :3000
 | `npm start` | Serves the production build |
 | `npm run lint` | ESLint (flat config, `next/core-web-vitals` + `next/typescript`) |
 | `npm run typecheck` | `tsc --noEmit` |
-| `npm run db:push` | ⚠️ Drops the `location` geometry column — see the warning above. Edit `supabase/schema.sql` instead. |
+| `npm run db:push` | ⚠️ Drops the `location` geometry column — see the warning above. Edit `supabase/schema.sql` or `db/schema.local.sql` instead. |
+| `npm run db:local` | Applies `db/schema.local.sql` to `$DATABASE_URL` (self-hosted setup) |
 | `npm run db:seed` | Inserts sample cameras; idempotent, safe to re-run |
 | `npm run db:studio` | Prisma Studio, to browse rows |
 
@@ -99,9 +138,12 @@ renders and the API returns `503` with a plain message rather than a stack
 trace — so a missing `DATABASE_URL` on a first deploy looks like a broken map,
 not a crashed app.
 
+`db/schema.local.sql` has been applied to a live Postgres 16 (its PostGIS
+statements excepted — no PostGIS package was reachable in that environment).
 `supabase/schema.sql` has **not** been executed against a live Postgres in this
 repo's checks — verify it by running it once in a scratch Supabase project
-before pointing production at it.
+before pointing production at it. `scripts/vps-setup.sh` passes `bash -n` and
+its `--check` path, but has not been run end to end on a fresh VPS.
 
 ---
 
@@ -205,14 +247,14 @@ shots don't land sideways.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `DATABASE_URL` | — | Supabase **pooled** connection string (port 6543) |
-| `DIRECT_URL` | — | Supabase **direct** connection (port 5432); migrations only |
+| `DATABASE_URL` | — | Postgres connection string. Supabase: the **pooled** one (port 6543). Self-hosted: the ordinary one. |
+| `DIRECT_URL` | — | Non-pooled connection, used for DDL. Self-hosted, this is the same string as `DATABASE_URL`. |
 | `SUPABASE_URL` | — | `https://<project-ref>.supabase.co` |
 | `SUPABASE_SERVICE_ROLE_KEY` | — | Server-only. Bypasses RLS; never expose it |
 | `SUPABASE_BUCKET` | `camera-photos` | Bucket created by `supabase/schema.sql` |
 | `SUPABASE_BUCKET_PUBLIC` | `true` | `false` streams photos through `/api/photos` instead of the CDN |
 | `STORAGE_DRIVER` | inferred | `supabase` when `SUPABASE_URL` is set, else `local` |
-| `UPLOAD_DIR` | `./storage/uploads` | Where the `local` driver writes (dev only) |
+| `UPLOAD_DIR` | `./storage/uploads` | Where the `local` driver writes. Must be on persistent storage in production. |
 | `MAX_UPLOAD_BYTES` | `8388608` | Rejected above this with `413` |
 | `RATE_LIMIT_PER_HOUR` | `20` | Submissions per IP |
 | `SUBMITTER_SALT` | `sightline` | Salt for the coarse submitter tag |
@@ -221,8 +263,13 @@ shots don't land sideways.
 
 ## The database
 
-Supabase Postgres with PostGIS. [`supabase/schema.sql`](supabase/schema.sql) is
-the source of truth for everything Prisma cannot express — the extension, the
+Postgres with PostGIS, hosted either way. Two schema files, kept in step:
+[`supabase/schema.sql`](supabase/schema.sql) for a Supabase project and
+[`db/schema.local.sql`](db/schema.local.sql) for a server you run yourself. The
+tables, trigger, constraints and indexes are identical; the local file drops
+the `extensions` schema qualification, the RLS policies, and the storage bucket
+(there is no PostgREST in front of a self-hosted database, and photos are on
+disk). Either file is the source of truth for everything Prisma cannot express — the extension, the
 `location` geometry column with its sync trigger and GiST index, the check
 constraints, RLS, and the storage bucket policies.
 `prisma/schema.prisma` declares the same table with `@map()` so the TypeScript
@@ -260,7 +307,80 @@ the object key rather than a URL.
 
 ---
 
-## Deploying
+## Self-hosting on a VPS
+
+[`scripts/vps-setup.sh`](scripts/vps-setup.sh) takes a bare Ubuntu 22.04 or
+24.04 box to a running Sightline: local Postgres with PostGIS, photos on disk,
+the app under systemd behind nginx, and a firewall open on exactly the ports it
+needs.
+
+```bash
+git clone <your-fork> /opt/sightline && cd /opt/sightline
+
+./scripts/vps-setup.sh --check          # what's installed, what's missing; changes nothing
+
+sudo ./scripts/vps-setup.sh --domain cameras.example.com --email you@example.com
+```
+
+Point the domain's A record at the server **before** running it, or certbot has
+nothing to validate. Without `--domain` it serves on the bare IP over HTTP.
+
+What it does, in order — each step skipped if already done, so re-running after
+a `git pull` is the redeploy:
+
+1. **Checks dependencies** and installs what's missing: Node (NodeSource
+   22.x by default, only if the system Node is older than 20), Postgres +
+   `postgresql-<ver>-postgis-3`, nginx, ufw, git, openssl, certbot.
+2. **Creates the role, database and extensions**, then applies
+   `db/schema.local.sql`.
+3. **Writes `.env`** with the connection string, `STORAGE_DRIVER=local`, a
+   generated `SUBMITTER_SALT` and a generated database password — `chmod 600`,
+   owned by the service account. On a re-run it rewrites only the four lines it
+   owns and reuses the existing password, so hand-edited limits survive.
+4. **Creates the `sightline` system user**, `npm ci`, `prisma generate`,
+   `next build`.
+5. **Installs `sightline.service`** — `Restart=always`, `NoNewPrivileges`,
+   `ProtectSystem=full`, `ReadWritePaths` limited to the upload directory.
+6. **Configures nginx** as a reverse proxy with `client_max_body_size` derived
+   from `MAX_UPLOAD_BYTES` (uploads 413 at the proxy otherwise) and
+   `X-Forwarded-For`, which the rate limiter keys on.
+7. **Configures ufw**: deny incoming by default, then 22, 80 and 443.
+8. **Requests a certificate** with `certbot --nginx --redirect`; renewal is
+   `certbot.timer`.
+
+### Ports
+
+| Port | Open to | Why |
+| --- | --- | --- |
+| 22 | world | SSH. Restrict it to your own address if you can: `ufw allow from <ip> to any port 22`. |
+| 80 | world | HTTP, redirected to 443 once a certificate exists. Also ACME renewals. |
+| 443 | world | HTTPS. **The capture flow needs it** — `navigator.geolocation` and the compass are unavailable on insecure origins. |
+| 3000 | nobody | Next.js binds `127.0.0.1`; nginx is the only public listener. Opened only with `--no-nginx`. |
+| 5432 | nobody | Postgres keeps its default `listen_addresses='localhost'`. Nothing off-box needs it. |
+
+### Operating it
+
+```bash
+journalctl -u sightline -f            # logs
+systemctl restart sightline           # restart
+sudo -u postgres psql sightline       # database
+ls /opt/sightline/storage/uploads     # photos
+
+cd /opt/sightline && git pull && sudo ./scripts/vps-setup.sh   # redeploy
+```
+
+Two things worth backing up: the database (`pg_dump sightline`) and
+`UPLOAD_DIR`. Losing either alone leaves rows pointing at missing photos or
+photos with no rows.
+
+### Flags
+
+`--port`, `--db-name`, `--db-user`, `--db-password`, `--upload-dir`,
+`--node-major`, `--seed`, `--no-nginx` (expose the app port directly),
+`--no-firewall` (if you manage rules elsewhere), `--no-build`, `--check`.
+`--help` lists them all.
+
+## Deploying to Vercel
 
 ### 1. Run the SQL
 
@@ -318,6 +438,7 @@ you ever remove that step.
 | --- | --- | --- |
 | Vercel / Netlify | `supabase` | Read-only filesystem; the `local` driver throws at boot on Vercel rather than failing at the first upload. |
 | Fly.io / Railway / Render | either | For `local`, attach a persistent volume and point `UPLOAD_DIR` at it. |
+| Ubuntu VPS | `local` | `scripts/vps-setup.sh` sets the whole thing up — see [Self-hosting on a VPS](#self-hosting-on-a-vps). |
 | VPS with Docker | either | Mount a volume for `storage/`. |
 
 ### Docker
@@ -382,11 +503,14 @@ Run `npx prisma db push` once against the production database before first boot.
 
 ```
 supabase/
-  schema.sql               One-click setup: postgis, cameras, bucket, RLS
+  schema.sql               One-click Supabase setup: postgis, cameras, bucket, RLS
+db/
+  schema.local.sql         The same schema for a Postgres you host yourself
 prisma/
   schema.prisma            Postgres; Camera + RateLimitHit models
 scripts/
   seed.mjs                 Eight sample cameras + an embedded placeholder JPEG
+  vps-setup.sh             Ubuntu: deps, Postgres, systemd, nginx, ufw, TLS
 src/
   app/
     layout.tsx             Fonts, theme-before-paint script, shared SVG defs
