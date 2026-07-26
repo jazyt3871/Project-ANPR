@@ -276,7 +276,10 @@ ok "postgis + pgcrypto enabled in ${DB_NAME}"
 DATABASE_URL="postgresql://${DB_USER}:${DB_PASSWORD}@127.0.0.1:5432/${DB_NAME}?schema=public&connection_limit=10"
 
 step "Applying db/schema.sql"
-sudo -u postgres psql -v ON_ERROR_STOP=1 -q -d "$DB_NAME" -f "$APP_DIR/db/schema.sql"
+# Piped in on stdin rather than passed as -f: the `postgres` user cannot read
+# a checkout under /home/<user>, because home directories are mode 0750 and it
+# has no traverse permission. Root opens the file, psql reads the bytes.
+sudo -u postgres psql -v ON_ERROR_STOP=1 -q -d "$DB_NAME" -f - < "$APP_DIR/db/schema.sql"
 sudo -u postgres psql -v ON_ERROR_STOP=1 -q -d "$DB_NAME" \
   -c "grant all privileges on all tables in schema public to \"${DB_USER}\"" \
   -c "grant all privileges on all sequences in schema public to \"${DB_USER}\""
