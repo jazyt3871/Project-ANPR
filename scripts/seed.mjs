@@ -123,43 +123,16 @@ const SAMPLES = [
   { lat: 43.64742, lng: -79.38594, heading: 309, accuracy: 11.3, headingSource: "manual", note: "Bearing set by hand; compass was unreliable next to the railing." },
 ];
 
-const BUCKET = process.env.SUPABASE_BUCKET ?? "camera-photos";
-
 /**
- * Mirrors the key convention and driver choice in src/lib/storage.ts. It is
- * duplicated rather than imported because this is a plain .mjs script and that
- * module is TypeScript — keep the two in step if the convention changes.
+ * Mirrors the key convention in src/lib/storage.ts. It is duplicated rather
+ * than imported because this is a plain .mjs script and that module is
+ * TypeScript — keep the two in step if the convention changes.
  */
-function storingInSupabase() {
-  const driver = (
-    process.env.STORAGE_DRIVER ?? (process.env.SUPABASE_URL ? "supabase" : "local")
-  ).toLowerCase();
-  return driver === "supabase";
-}
-
-let supabase = null;
-
 async function writePlaceholder() {
   const bytes = Buffer.from(PLACEHOLDER_JPEG_BASE64, "base64");
   const now = new Date();
   const dir = `${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
   const key = `${dir}/${randomUUID()}.jpg`;
-
-  if (storingInSupabase()) {
-    if (!supabase) {
-      const { createClient } = await import("@supabase/supabase-js");
-      supabase = createClient(
-        process.env.SUPABASE_URL,
-        process.env.SUPABASE_SERVICE_ROLE_KEY,
-        { auth: { persistSession: false } },
-      );
-    }
-    const { error } = await supabase.storage
-      .from(BUCKET)
-      .upload(key, bytes, { contentType: "image/jpeg", upsert: false });
-    if (error) throw new Error(`Supabase upload failed: ${error.message}`);
-    return key;
-  }
 
   const full = path.join(UPLOAD_DIR, key);
   await mkdir(path.dirname(full), { recursive: true });
@@ -168,12 +141,6 @@ async function writePlaceholder() {
 }
 
 async function main() {
-  if (storingInSupabase() && !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    throw new Error(
-      "Seeding into Supabase needs SUPABASE_SERVICE_ROLE_KEY — the anon key cannot write to the bucket.",
-    );
-  }
-
   const removed = await prisma.camera.deleteMany({
     where: { note: { endsWith: SEED_TAG } },
   });
@@ -204,11 +171,7 @@ async function main() {
     created += 1;
   }
 
-  console.log(
-    `Seeded ${created} cameras. Photos written to ${
-      storingInSupabase() ? `the ${BUCKET} bucket` : UPLOAD_DIR
-    }`,
-  );
+  console.log(`Seeded ${created} cameras. Photos written to ${UPLOAD_DIR}`);
   console.log("Open http://localhost:3000 and pan to downtown Toronto.");
 }
 

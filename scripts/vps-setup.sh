@@ -3,8 +3,8 @@
 # Project ANPR — Ubuntu VPS setup
 #
 # Takes a bare Ubuntu 22.04/24.04 box to a running Project ANPR: everything on
-# this one server — Postgres with PostGIS, photos on local disk, the site
-# itself served on port 3000.
+# this one server and nothing off it — Postgres with PostGIS, photos on local
+# disk, the site itself served on port 3000.
 #
 #   sudo ./scripts/vps-setup.sh                  # site on http://<server-ip>:3000
 #   sudo ./scripts/vps-setup.sh --port 8080      # a different port
@@ -275,8 +275,8 @@ ok "postgis + pgcrypto enabled in ${DB_NAME}"
 # and port 5432 stays closed in the firewall below.
 DATABASE_URL="postgresql://${DB_USER}:${DB_PASSWORD}@127.0.0.1:5432/${DB_NAME}?schema=public&connection_limit=10"
 
-step "Applying db/schema.local.sql"
-sudo -u postgres psql -v ON_ERROR_STOP=1 -q -d "$DB_NAME" -f "$APP_DIR/db/schema.local.sql"
+step "Applying db/schema.sql"
+sudo -u postgres psql -v ON_ERROR_STOP=1 -q -d "$DB_NAME" -f "$APP_DIR/db/schema.sql"
 sudo -u postgres psql -v ON_ERROR_STOP=1 -q -d "$DB_NAME" \
   -c "grant all privileges on all tables in schema public to \"${DB_USER}\"" \
   -c "grant all privileges on all sequences in schema public to \"${DB_USER}\""
@@ -313,22 +313,16 @@ if [[ -f "$ENV_FILE" ]]; then
     fi
   }
   set_env DATABASE_URL "$DATABASE_URL"
-  set_env DIRECT_URL "$DATABASE_URL"
-  set_env STORAGE_DRIVER "local"
   set_env UPLOAD_DIR "$UPLOAD_DIR"
   ok "updated existing .env"
 else
   cat > "$ENV_FILE" <<EOF
 # Written by scripts/vps-setup.sh — self-hosted Sightline.
 
-# Local Postgres over the loopback interface. No pooler: a long-lived Node
-# process holds its own pool, so DATABASE_URL and DIRECT_URL are the same
-# connection.
+# Postgres on this machine, over the loopback interface.
 DATABASE_URL="${DATABASE_URL}"
-DIRECT_URL="${DATABASE_URL}"
 
 # Photos on this server's disk, served through /api/photos.
-STORAGE_DRIVER="local"
 UPLOAD_DIR="${UPLOAD_DIR}"
 
 # Submission limits

@@ -1,20 +1,15 @@
 -- ===========================================================================
--- Project ANPR — self-hosted Postgres setup
+-- Project ANPR — database setup
 --
--- The local twin of supabase/schema.sql, for a Postgres server you run
--- yourself (a VPS, a container, your laptop). Differences from the Supabase
--- file, all of them because there is no Supabase here:
---
---   * PostGIS installs into `public`, not the `extensions` schema
---   * no `storage.buckets` / `storage.objects` — photos live on disk under
---     UPLOAD_DIR and are served by /api/photos (STORAGE_DRIVER=local)
---   * no RLS: nothing but the app's own role ever connects, and it owns the
---     tables, so row-level policies would only be theatre
---
--- Apply it with:
---   psql "$DATABASE_URL" -f db/schema.local.sql
+-- Postgres with PostGIS, running on the same machine as the app. Apply it with
+--   psql "$DATABASE_URL" -f db/schema.sql
 -- or let scripts/vps-setup.sh do it for you. Idempotent — re-running is
 -- harmless.
+--
+-- There is no row-level security here: nothing but the app's own role ever
+-- connects, and it owns the tables, so policies would be theatre. Photos are
+-- not in the database at all — they are files under UPLOAD_DIR, served by
+-- /api/photos.
 --
 -- WARNING: do not run `prisma db push` against a database set up by this
 -- script. Prisma has no geometry type, so `location` is absent from

@@ -3,15 +3,13 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 /**
- * Photo storage behind a two-method interface so the deployment target can
- * change without touching the route handlers.
+ * Photo storage behind a two-method interface, so swapping the backing store
+ * later is one class rather than a change to every route handler.
  *
- *   STORAGE_DRIVER=supabase  -> a Supabase Storage bucket (production)
- *   STORAGE_DRIVER=local     -> UPLOAD_DIR on the server's disk (dev only)
- *
- * When STORAGE_DRIVER is unset the driver is inferred from whether SUPABASE_URL
- * is present. Serverless platforms with read-only filesystems (Vercel, Netlify
- * functions) cannot use the local driver at all.
+ * There is one driver: UPLOAD_DIR on the server's own disk. That is the whole
+ * deployment model — Postgres and the photos live on the same box as the app.
+ * A host with a read-only or ephemeral filesystem needs a second driver
+ * implementing this interface; nothing outside this file would change.
  */
 
 export type PutResult = { key: string };
@@ -118,104 +116,11 @@ class LocalDriver implements StorageDriver {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Supabase Storage                                                           */
-/* -------------------------------------------------------------------------- */
-
-class SupabaseDriver implements StorageDriver {
-  readonly name = "supabase";
-  private readonly url: string;
-  private readonly serviceKey: string;
-  private readonly bucket: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private client: any | null = null;
-
-  constructor(url: string, serviceKey: string, bucket: string) {
-    this.url = url;
-    this.serviceKey = serviceKey;
-    this.bucket = bucket;
-  }
-
-  private async getClient() {
-    if (this.client) return this.client;
-    // Imported lazily so `local` deployments never need the package installed.
-    const mod = await import("@supabase/supabase-js").catch(() => {
-      throw new Error(
-        "STORAGE_DRIVER=supabase requires `npm install @supabase/supabase-js`",
-      );
-    });
-    this.client = mod.createClient(this.url, this.serviceKey, {
-      auth: { persistSession: false },
-    });
-    return this.client;
-  }
-
-  async put(bytes: Uint8Array, contentType: string): Promise<PutResult> {
-    const key = buildKey(contentType);
-    const client = await this.getClient();
-    const { error } = await client.storage
-      .from(this.bucket)
-      .upload(key, bytes, { contentType, upsert: false });
-    if (error) throw new Error(`Supabase upload failed: ${error.message}`);
-    return { key };
-  }
-
-  async get(key: string): Promise<GetResult> {
-    if (!isValidKey(key)) throw new Error("Invalid storage key");
-    const client = await this.getClient();
-    const { data, error } = await client.storage.from(this.bucket).download(key);
-    if (error || !data) {
-      throw new Error(`Supabase download failed: ${error?.message ?? "no body"}`);
-    }
-    return { body: await data.arrayBuffer(), contentType: contentTypeForKey(key) };
-  }
-
-  publicUrl(key: string): string | null {
-    // supabase/schema.sql creates the bucket public, so serve straight from the
-    // CDN by default. Set SUPABASE_BUCKET_PUBLIC=false if you later make the
-    // bucket private: reads then fall back to /api/photos, which streams the
-    // bytes through the service-role key instead.
-    if (process.env.SUPABASE_BUCKET_PUBLIC === "false") return null;
-    return `${this.url}/storage/v1/object/public/${this.bucket}/${key}`;
-  }
-}
-
-/* -------------------------------------------------------------------------- */
 
 let cached: StorageDriver | null = null;
 
 export function storage(): StorageDriver {
-  if (cached) return cached;
-
-  // Infer rather than default to "local": a Vercel deployment has a read-only
-  // filesystem, so silently falling back to the local driver there would fail
-  // at the first upload rather than at boot. If Supabase is configured, use it.
-  const driver = (
-    process.env.STORAGE_DRIVER ??
-    (process.env.SUPABASE_URL ? "supabase" : "local")
-  ).toLowerCase();
-
-  if (driver === "local" && process.env.VERCEL) {
-    throw new Error(
-      "STORAGE_DRIVER=local cannot work on Vercel: the filesystem is read-only. " +
-        "Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in the project's " +
-        "environment variables.",
-    );
-  }
-
-  if (driver === "supabase") {
-    const url = process.env.SUPABASE_URL;
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    const bucket = process.env.SUPABASE_BUCKET ?? "camera-photos";
-    if (!url || !key) {
-      throw new Error(
-        "STORAGE_DRIVER=supabase needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY",
-      );
-    }
-    cached = new SupabaseDriver(url, key, bucket);
-    return cached;
-  }
-
-  cached = new LocalDriver(process.env.UPLOAD_DIR ?? "./storage/uploads");
+  cached ??= new LocalDriver(process.env.UPLOAD_DIR ?? "./storage/uploads");
   return cached;
 }
 
