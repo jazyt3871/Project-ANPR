@@ -49,11 +49,17 @@ else
 fi
 
 echo "==> Starting postgis/postgis"
+# PGDATA points at a *subdirectory* of the mount, not the mount itself. A fresh
+# Fly volume (like any ext4 filesystem) contains lost+found, and the postgres
+# image's initdb refuses to initialize into a directory that isn't empty:
+#   initdb: error: directory "/var/lib/postgresql/data" exists but is not empty
+# The container then exits, and nothing is listening on 5432.
 fly machine run postgis/postgis:16-3.4 \
   --app "$NAME" \
   --region "$REGION" \
   --name "${NAME}-1" \
   --volume "pgdata:/var/lib/postgresql/data" \
+  --env "PGDATA=/var/lib/postgresql/data/pgdata" \
   --env "POSTGRES_USER=${DB_USER}" \
   --env "POSTGRES_PASSWORD=${DB_PASSWORD}" \
   --env "POSTGRES_DB=${DB_NAME}" \
