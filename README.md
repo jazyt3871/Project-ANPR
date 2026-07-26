@@ -108,6 +108,14 @@ have not been executed here.
 `scripts/vps-setup.sh` passes `bash -n` and its `--check` path, but has not
 been run end to end on a fresh VPS.
 
+The `next build`'s standalone output (what `Dockerfile` and Fly ship) has been
+run directly — `node .next/standalone/server.js` against the same live
+Postgres, with the same schema, uploading through `POST /api/cameras` and
+reading it back through `GET /api/photos/<key>` — so the server Fly actually
+runs is verified. What isn't: no Docker daemon was reachable here, so
+`docker build` / `fly deploy` themselves are unexercised, and
+`scripts/fly-db-setup.sh` — no Fly account was available to run it against.
+
 The build completes with no database reachable, which is what keeps a CI build
 from depending on the database. With unset credentials the page still renders
 and the API returns `503` with a plain message rather than a stack trace — so a
@@ -350,41 +358,84 @@ all.
 
 ---
 
+## Deploying to Fly.io (free tier)
+
+Free, no domain needed, no VPS to patch — Fly's free allowance (3 shared
+`shared-cpu-1x-256mb` machines, 3GB of volume storage) covers the app and the
+database as two small Fly apps talking over Fly's private network. Nothing
+public except the site itself.
+
+Fly's own managed Postgres product does **not** ship PostGIS, so the database
+here is the official `postgis/postgis` image run as a plain Fly Machine
+instead — [`scripts/fly-db-setup.sh`](scripts/fly-db-setup.sh) does that part.
+
+```bash
+# 1. Install flyctl and log in — https://fly.io/docs/flyctl/install/
+fly auth login
+
+# 2. Database: creates the project-anpr-db app, a 1GB volume, and starts
+#    postgis/postgis on it. Prints the connection string and password.
+./scripts/fly-db-setup.sh --region iad
+
+# 3. Apply the schema through a local tunnel to that private machine
+fly proxy 5432 --app project-anpr-db &
+psql "postgresql://anpr:<password-from-step-2>@127.0.0.1:5432/anpr" -f db/schema.sql
+kill %1
+
+# 4. App: create it, give it a volume for photos, set secrets, deploy
+fly apps create project-anpr
+fly volumes create uploads --app project-anpr --region iad --size 1
+fly secrets set --app project-anpr \
+  DATABASE_URL="postgresql://anpr:<password-from-step-2>@project-anpr-db.internal:5432/anpr" \
+  SUBMITTER_SALT="$(openssl rand -hex 32)"
+fly deploy
+```
+
+`fly deploy` builds [`Dockerfile`](Dockerfile) — a multi-stage build using
+Next's `output: "standalone"` (set in `next.config.ts`), so the runtime image
+carries only the files the server actually traced, not the full
+`node_modules`. That matters at 256MB of RAM. [`fly.toml`](fly.toml) wires
+`UPLOAD_DIR` to the mounted volume and sets `auto_stop_machines`, so the app
+scales to zero — and stops costing anything — when nobody's visiting, and
+starts again in about a second on the next request.
+
+You'll get a `https://project-anpr.fly.dev` URL with a real certificate
+already, so the capture flow works immediately — no separate HTTPS step like
+the VPS needs.
+
+Re-deploying after changes is `fly deploy` from the repo root; nothing else.
+
+### Why not Fly's own Postgres, or Render / Railway
+
+- **Fly Postgres** — their managed image is a great fit for a normal app, but
+  it doesn't include PostGIS, and `location`'s trigger, index and the radius
+  queries in `db/schema.sql` all depend on it. Running `postgis/postgis`
+  ourselves is the same free-tier cost with the extension included.
+- **Render** — the free Postgres tier is deleted after 90 days and the free
+  web service cold-starts after 15 minutes idle; fine for a demo, not for
+  something meant to stay up.
+- **Railway** — no real free tier any more, trial credit only.
+
+---
+
 ## Other ways to run it
 
-The deployment model is one machine: Postgres, the photos and the app together.
+The deployment model is one machine (or two, for Fly): Postgres, the photos
+and the app together, or the app talking to a Postgres it can reach privately.
 Anything that gives you a persistent filesystem and a Postgres works — a VPS
-(above), a Fly.io or Render instance with a volume mounted at `UPLOAD_DIR`, or
-Docker. Platforms with read-only or ephemeral filesystems (Vercel, Netlify
-functions) do not: photos would vanish between deploys. Supporting one means
-writing a second `StorageDriver` in `src/lib/storage.ts` — the interface is two
-methods and nothing outside that file would change.
+(above), Fly.io (above), a Render instance with a volume mounted at
+`UPLOAD_DIR`, or plain Docker (below). Platforms with read-only or ephemeral
+filesystems (Vercel, Netlify functions) do not: photos would vanish between
+deploys. Supporting one means writing a second `StorageDriver` in
+`src/lib/storage.ts` — the interface is two methods and nothing outside that
+file would change.
 
 ### Docker
 
-```dockerfile
-FROM node:22-slim AS build
-WORKDIR /app
-# openssl is required by the Prisma query engine
-RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
-COPY package.json package-lock.json ./
-RUN npm ci
-COPY . .
-# next/font and prisma both reach the network during this step
-RUN npm run build
-
-FROM node:22-slim AS run
-WORKDIR /app
-RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
-ENV NODE_ENV=production
-COPY --from=build /app/.next ./.next
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/public ./public
-COPY --from=build /app/prisma ./prisma
-COPY --from=build /app/package.json ./
-EXPOSE 3000
-CMD ["npm", "start"]
-```
+[`Dockerfile`](Dockerfile) is the same three-stage build Fly deploys above —
+`npm ci` → `prisma generate && next build` (with `output: "standalone"` from
+`next.config.ts`) → a slim runtime image with just the traced files. Works
+anywhere Docker does, not only on Fly:
 
 ```bash
 docker build -t project-anpr .
@@ -421,6 +472,8 @@ Apply `db/schema.sql` to that database once before first boot.
 ## Project structure
 
 ```
+Dockerfile                 Multi-stage build; the image Fly and plain Docker both run
+fly.toml                   Fly app config: volume, port, scale-to-zero
 db/
   schema.sql               postgis, cameras, geometry trigger, rate-limit table
 prisma/
@@ -428,6 +481,7 @@ prisma/
 scripts/
   seed.mjs                 Eight sample cameras + an embedded placeholder JPEG
   vps-setup.sh             Ubuntu: deps, Postgres, systemd, nginx, ufw, TLS
+  fly-db-setup.sh          postgis/postgis as a Fly Machine, for fly.toml above
 src/
   app/
     layout.tsx             Fonts, theme-before-paint script, shared SVG defs
