@@ -1,12 +1,12 @@
-<#
+﻿<#
 .SYNOPSIS
-  Project ANPR — Windows setup.
+  Project ANPR -- Windows setup.
 
 .DESCRIPTION
   Sets the whole thing up on a Windows PC: Postgres, the database, the photo
   directory, .env, and a production build. Everything stays on this machine.
 
-  To put it on the internet afterwards, use a Cloudflare Tunnel — free, no
+  To put it on the internet afterwards, use a Cloudflare Tunnel -- free, no
   port forwarding, real HTTPS on your own domain. See -Tunnel below and the
   "Running it from a Windows PC" section of the README.
 
@@ -27,7 +27,7 @@
   As above, then print the exact cloudflared commands for that hostname.
 
 .NOTES
-  Run from an ordinary PowerShell window — winget will prompt for elevation
+  Run from an ordinary PowerShell window -- winget will prompt for elevation
   by itself when it needs it. If script execution is blocked, either:
      powershell -ExecutionPolicy Bypass -File .\scripts\windows-setup.ps1
   or unblock this repo once:
@@ -80,7 +80,7 @@ function Find-Psql {
 }
 
 # ---------------------------------------------------------------------------
-# 0. Dependency report — all of -Check, and the preamble of a real run
+# 0. Dependency report -- all of -Check, and the preamble of a real run
 # ---------------------------------------------------------------------------
 Write-Step "Dependency check"
 
@@ -90,12 +90,12 @@ if (Test-Cmd "node") {
   $nodeVersion = (node -v).TrimStart("v")
   $nodeMajor = [int]($nodeVersion.Split(".")[0])
   if ($nodeMajor -ge 20) { Write-Ok "node $nodeVersion" }
-  else { Write-Warn "node $nodeVersion is too old — Next.js 15 needs 20.9+" }
+  else { Write-Warn "node $nodeVersion is too old -- Next.js 15 needs 20.9+" }
 } else { Write-Warn "node missing" }
 
 if (Test-Cmd "npm")  { Write-Ok "npm $(npm -v)" } else { Write-Warn "npm missing" }
 if ($psqlPath)       { Write-Ok "psql found at $psqlPath" } else { Write-Warn "postgres missing" }
-if (Test-Cmd "winget") { Write-Ok "winget available" } else { Write-Warn "winget missing — install 'App Installer' from the Microsoft Store" }
+if (Test-Cmd "winget") { Write-Ok "winget available" } else { Write-Warn "winget missing -- install 'App Installer' from the Microsoft Store" }
 if (Test-Cmd "cloudflared") { Write-Ok "cloudflared $(cloudflared --version 2>$null)" }
 else { Write-Info "cloudflared not installed (only needed for -Tunnel)" }
 
@@ -121,7 +121,7 @@ if (-not (Test-Cmd "node") -or [int]((node -v).TrimStart("v").Split(".")[0]) -lt
   Write-Info "installing Node.js 22 LTS"
   winget install --id OpenJS.NodeJS.LTS --silent --accept-package-agreements --accept-source-agreements
   Update-Path
-  if (-not (Test-Cmd "node")) { Die "Node install finished but node is still not on PATH — open a new terminal and re-run." }
+  if (-not (Test-Cmd "node")) { Die "Node install finished but node is still not on PATH -- open a new terminal and re-run." }
   Write-Ok "node $(node -v)"
 } else { Write-Ok "node already present" }
 
@@ -137,7 +137,7 @@ if (-not $psqlPath) {
   if (-not $psqlPath) { Die "PostgreSQL installed but psql.exe was not found. Open a new terminal and re-run." }
   Write-Ok "postgres installed"
   Write-Warn "postgres superuser password: $script:PgSuperPassword"
-  Write-Info "write that down — it is the 'postgres' account, separate from the app's own login"
+  Write-Info "write that down -- it is the 'postgres' account, separate from the app's own login"
 } else { Write-Ok "postgres already present" }
 
 $pgService = Get-Service -Name "postgresql*" -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -183,7 +183,7 @@ function Invoke-Psql {
 
 $null = & $psqlPath -tAq -U postgres -h 127.0.0.1 -d postgres -c "select 1" 2>&1
 if ($LASTEXITCODE -ne 0) {
-  Die "cannot connect to Postgres as the 'postgres' user — wrong password, or the service is not running."
+  Die "cannot connect to Postgres as the 'postgres' user -- wrong password, or the service is not running."
 }
 
 $roleExists = Invoke-Psql -Sql "select 1 from pg_roles where rolname = '$DbUser'"
@@ -204,7 +204,7 @@ if ($dbExists -eq "1") {
 }
 
 Write-Step "Applying db/schema.sql"
-# PostGIS is optional — the schema file detects it and skips the geometry
+# PostGIS is optional -- the schema file detects it and skips the geometry
 # column when it is missing, which is the normal case on Windows.
 Invoke-Psql -Database $DbName -File (Join-Path $AppDir "db\schema.sql")
 Invoke-Psql -Database $DbName -Sql "grant all on schema public to ""$DbUser""" | Out-Null
@@ -213,7 +213,7 @@ Invoke-Psql -Database $DbName -Sql "grant all privileges on all sequences in sch
 Write-Ok "schema applied and granted to $DbUser"
 
 $hasPostgis = Invoke-Psql -Database $DbName -Sql "select 1 from pg_extension where extname = 'postgis'"
-if ($hasPostgis -eq "1") { Write-Ok "postgis enabled — geometry column is present" }
+if ($hasPostgis -eq "1") { Write-Ok "postgis enabled -- geometry column is present" }
 else { Write-Info "no postgis: geometry column skipped, everything the app uses works without it" }
 
 $env:PGPASSWORD = $null
@@ -275,7 +275,7 @@ if (-not $SkipBuild) {
       # than fail the whole setup.
       npm ci --no-audit --fund=false
       if ($LASTEXITCODE -ne 0) {
-        Write-Warn "npm ci failed or out of sync — falling back to npm install"
+        Write-Warn "npm ci failed or out of sync -- falling back to npm install"
         npm install --no-audit --fund=false
         if ($LASTEXITCODE -ne 0) { Die "npm install failed" }
       }
@@ -347,7 +347,7 @@ Project ANPR is set up.
     git pull; .\scripts\windows-setup.ps1
 
   Note: the GPS and compass steps need HTTPS. On http://localhost they work
-  fine, but over your LAN or a plain-HTTP address they do not — which is what
+  fine, but over your LAN or a plain-HTTP address they do not -- which is what
   the Cloudflare Tunnel (-Tunnel) is for.
 
 "@ -ForegroundColor Green
