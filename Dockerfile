@@ -8,8 +8,22 @@ WORKDIR /app
 # openssl is required by the Prisma query engine at generate time.
 RUN apt-get update && apt-get install -y --no-install-recommends openssl \
     && rm -rf /var/lib/apt/lists/*
-COPY package.json package-lock.json ./
-RUN npm ci
+# The trailing `*` on package-lock.json makes it an optional glob: Docker's
+# COPY does not error when a glob matches nothing, unlike naming the file
+# directly (see the public/ note in the run stage below for the same trick's
+# sibling problem). That lets the same image build whether or not a lockfile
+# made it into the build context.
+COPY package.json package-lock.json* ./
+# npm ci is the reproducible path, but it hard-fails on a missing lockfile or
+# one that has drifted from package.json — "can only install with an existing
+# package-lock.json" is that failure. Fall back to npm install rather than
+# breaking every build over it, same as scripts/install-linux.sh and
+# scripts/install-windows.ps1 do for the same reason.
+RUN if [ -f package-lock.json ]; then \
+      npm ci --no-audit --fund=false || npm install --no-audit --fund=false; \
+    else \
+      npm install --no-audit --fund=false; \
+    fi
 
 FROM node:22-slim AS build
 WORKDIR /app
