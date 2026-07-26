@@ -21,6 +21,10 @@ COPY . .
 # "Building offline" in the README if that's not available here.
 RUN npx prisma generate
 RUN npm run build
+# This project has no public/ directory (no static assets outside the app
+# router). COPY --from requires the source to exist, so guarantee an empty
+# one rather than special-case it in the run stage below.
+RUN mkdir -p public
 
 # next.config.ts sets output: "standalone", so .next/standalone is a
 # self-contained server with only the node_modules it actually traced —
