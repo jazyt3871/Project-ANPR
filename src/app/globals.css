@@ -118,7 +118,15 @@
    ========================================================================== */
 
 .leaflet-container {
-  background: var(--void);
+  /* !important because leaflet.css itself declares `.leaflet-container {
+     background: #ddd }` at the same specificity — MapView.tsx imports that
+     stylesheet lazily (next/dynamic), so it can land in the document after
+     this one and win on source order alone. Without !important, the gaps at
+     the poles and past the antimeridian at low zoom show Leaflet's #ddd
+     instead of this.
+     Fixed black rather than var(--void): #ddd read as a bug in both themes,
+     not just the light one, so this doesn't need to track the theme toggle. */
+  background: #000 !important;
   font-family: var(--font-sans);
   outline: none;
 }
