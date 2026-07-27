@@ -72,13 +72,13 @@ export function CameraDetailSheet({
       open
       onClose={onClose}
       eyebrow="Submitted camera"
-      title={`Looking ${formatBearing(camera.heading)}`}
+      title={camera.is360 ? "360° coverage" : `Looking ${formatBearing(camera.heading)}`}
     >
       <div className="space-y-5">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={camera.photoUrl}
-          alt={`Camera looking ${Math.round(camera.heading)} degrees`}
+          alt={camera.is360 ? "360-degree camera" : `Camera looking ${Math.round(camera.heading)} degrees`}
           width={camera.photoWidth ?? undefined}
           height={camera.photoHeight ?? undefined}
           loading="lazy"
@@ -86,16 +86,18 @@ export function CameraDetailSheet({
         />
 
         <div className="flex items-center gap-4 rounded-xl border border-rule bg-raised p-4">
-          <SightlineGlyph bearing={camera.heading} size={80} />
+          <SightlineGlyph bearing={camera.heading} size={80} is360={camera.is360} />
           <div className="min-w-0">
-            <p className="eyebrow mb-1">Bearing from true north</p>
+            <p className="eyebrow mb-1">{camera.is360 ? "Coverage" : "Bearing from true north"}</p>
             <p className="readout text-2xl leading-none font-medium text-ink">
-              {formatBearing(camera.heading)}
+              {camera.is360 ? "360°" : formatBearing(camera.heading)}
             </p>
             <p className="mt-1.5 text-[0.75rem] text-graphite">
-              {camera.headingSource === "manual"
-                ? "Set by hand on the dial"
-                : "Read from the device compass"}
+              {camera.is360
+                ? "Dome / panoramic — covers every direction"
+                : camera.headingSource === "manual"
+                  ? "Set by hand on the dial"
+                  : "Read from the device compass"}
             </p>
           </div>
         </div>

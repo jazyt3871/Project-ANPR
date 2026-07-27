@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Compass, Lock, RotateCcw, TriangleAlert } from "lucide-react";
+import { Compass, Disc, Lock, RotateCcw, TriangleAlert } from "lucide-react";
 import { CompassDial } from "@/components/CompassDial";
 import { Button, Notice } from "@/components/ui/primitives";
 import { formatBearing } from "@/lib/geo";
@@ -14,7 +14,8 @@ export type StepHeadingProps = {
   compass: CompassApi;
   /** Bearing already locked in for this draft, if the user has been here before. */
   locked: number | null;
-  onLock: (bearing: number, source: HeadingSource) => void;
+  /** `is360` when the camera has no single bearing — see the button below. */
+  onLock: (bearing: number, source: HeadingSource, is360?: boolean) => void;
 };
 
 /** Statuses where the live sensor cannot produce a bearing at all. */
@@ -147,6 +148,27 @@ export function StepHeading({ compass, locked, onLock }: StepHeadingProps) {
             {manualMode ? "Go back to the live compass" : "Set the bearing by hand"}
           </Button>
         ) : null}
+      </div>
+
+      {/* Separate from the lock action above: a dome or panoramic rig has no
+          single bearing to point a cone at, so this skips the dial entirely
+          rather than asking for a direction that doesn't exist. */}
+      <div className="border-t border-rule pt-4">
+        <button
+          type="button"
+          onClick={() => onLock(0, useManual ? "manual" : "sensor", true)}
+          className="flex w-full items-center gap-2.5 rounded-lg border border-rule px-3.5 py-3 text-left transition-colors hover:bg-raised"
+        >
+          <Disc className="size-[18px] shrink-0 text-graphite" />
+          <span className="min-w-0">
+            <span className="block text-[0.8125rem] font-medium text-ink">
+              This is a 360° / panoramic camera
+            </span>
+            <span className="block text-[0.75rem] text-graphite">
+              Domes and panoramic rigs cover every direction — skip setting a bearing.
+            </span>
+          </span>
+        </button>
       </div>
     </div>
   );

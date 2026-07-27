@@ -210,9 +210,17 @@ version has to stay in step with both React and Leaflet.
 | Step | What happens | Fallback when it fails |
 | --- | --- | --- |
 | 1. Location | `watchPosition` at `enableHighAccuracy`, keeping the **tightest** reading while a meter shows it converging | Tap the map to place the pin; stored with no accuracy value |
-| 2. Bearing | Live compass under a fixed sightline, smoothed by circular mean | Drag the dial, or arrow-key it; recorded as `headingSource: "manual"` |
+| 2. Bearing | Live compass under a fixed sightline, smoothed by circular mean | Drag the dial, or arrow-key it; recorded as `headingSource: "manual"`. Or skip it entirely — see below |
 | 3. Photo | `<input capture="environment">`, then downscaled and re-encoded in-browser | Plain file picker |
 | 4. Save | One `multipart/form-data` POST | Errors state what happened and what to do |
+
+**360° / panoramic cameras.** A dome or panoramic rig has no single bearing to
+lock, so step 2 has a second action beside the dial: "This is a 360° /
+panoramic camera" skips straight to the photo step. `is360` is stored on the
+row (`heading` still gets written as `0`, by convention, and is ignored
+everywhere it would otherwise be read); the marker, the review card, and the
+detail sheet all switch from the directional cone to a dashed ring, so a 360°
+submission never looks like it's pointing somewhere it isn't.
 
 ### The compass, specifically
 
@@ -728,7 +736,9 @@ being set in mono tells you it came off a sensor.
 The signature is the **sightline cone**. `lib/sightline.ts` holds one geometry
 function, and the Leaflet marker, the compass dial, and the review screen all
 render from it. Locking a bearing shows you the exact mark that will appear on
-the map.
+the map. A 360°/panoramic camera has no bearing to point the cone at, so the
+same three renderers switch to a dashed ring instead — one flag (`is360`)
+threaded through all of them, rather than a second glyph maintained separately.
 
 Colours for SVG live in CSS classes rather than presentation attributes: `var()`
 inside an attribute value is inconsistently supported, whereas a CSS rule always

@@ -174,6 +174,11 @@ alter table public.cameras
 
 create index if not exists cameras_user_idx on public.cameras (user_id);
 
+-- Domes and panoramic rigs cover every bearing at once, so `heading` is
+-- meaningless for them (stored as 0 by convention rather than made nullable).
+alter table public.cameras
+  add column if not exists is_360 boolean not null default false;
+
 -- ---------------------------------------------------------------------------
 -- 3. rate_limit_hits — shared state for the submission limiter
 -- ---------------------------------------------------------------------------

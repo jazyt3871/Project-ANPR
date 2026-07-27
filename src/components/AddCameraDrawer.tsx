@@ -142,8 +142,8 @@ export function AddCameraDrawer({
     setStepIndex(1);
   }
 
-  function lockHeading(bearing: number, source: HeadingSource) {
-    setDraft((d) => ({ ...d, heading: bearing, headingSource: source }));
+  function lockHeading(bearing: number, source: HeadingSource, is360 = false) {
+    setDraft((d) => ({ ...d, heading: bearing, headingSource: source, is360 }));
     stopCompass();
     setStepIndex(2);
   }
@@ -186,6 +186,7 @@ export function AddCameraDrawer({
     if (draft.accuracy !== null) body.set("accuracy", String(draft.accuracy));
     body.set("heading", String(draft.heading));
     body.set("headingSource", draft.headingSource);
+    body.set("is360", String(draft.is360));
     if (draft.note.trim()) body.set("note", draft.note.trim());
     if (draft.photoWidth) body.set("photoWidth", String(draft.photoWidth));
     if (draft.photoHeight) body.set("photoHeight", String(draft.photoHeight));

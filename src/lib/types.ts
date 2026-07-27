@@ -8,6 +8,8 @@ export type CameraDTO = {
   accuracy: number | null;
   heading: number;
   headingSource: HeadingSource;
+  /** Covers every bearing at once — a dome or panoramic rig. `heading` is unused when true. */
+  is360: boolean;
   photoUrl: string;
   photoWidth: number | null;
   photoHeight: number | null;
@@ -34,6 +36,7 @@ export type DraftCamera = {
   accuracy: number | null;
   heading: number | null;
   headingSource: HeadingSource;
+  is360: boolean;
   photo: Blob | null;
   photoPreviewUrl: string | null;
   photoWidth: number | null;
@@ -48,6 +51,7 @@ export const emptyDraft: DraftCamera = {
   accuracy: null,
   heading: null,
   headingSource: "sensor",
+  is360: false,
   photo: null,
   photoPreviewUrl: null,
   photoWidth: null,

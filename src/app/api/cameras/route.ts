@@ -175,9 +175,12 @@ export async function POST(request: NextRequest) {
         lat: data.lat,
         lng: data.lng,
         accuracy: data.accuracy ?? null,
-        // 360 and 0 are the same bearing; store one of them.
+        // A bearing of 360 and of 0 are the same direction; store one of
+        // them. Unrelated to is360 below, which is a camera *type* (a dome or
+        // panoramic rig with no single bearing at all), not a bearing value.
         heading: data.heading % 360,
         headingSource: data.headingSource,
+        is360: data.is360,
         photoKey: key,
         photoWidth: data.photoWidth ?? null,
         photoHeight: data.photoHeight ?? null,

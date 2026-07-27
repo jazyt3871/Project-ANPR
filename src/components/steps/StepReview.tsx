@@ -30,14 +30,22 @@ export function StepReview({
     <div className="space-y-5">
       {/* The same glyph that will appear on the map, so there is no surprise. */}
       <div className="flex items-center gap-4 rounded-xl border border-rule bg-raised p-4">
-        <SightlineGlyph bearing={draft.heading ?? 0} size={84} />
+        <SightlineGlyph bearing={draft.heading ?? 0} size={84} is360={draft.is360} />
         <div className="min-w-0">
-          <p className="eyebrow mb-1">Bearing</p>
+          <p className="eyebrow mb-1">{draft.is360 ? "Coverage" : "Bearing"}</p>
           <p className="readout text-2xl leading-none font-medium text-ink">
-            {draft.heading === null ? "—" : formatBearing(draft.heading)}
+            {draft.is360
+              ? "360°"
+              : draft.heading === null
+                ? "—"
+                : formatBearing(draft.heading)}
           </p>
           <p className="mt-1.5 text-[0.75rem] text-graphite">
-            {draft.headingSource === "manual" ? "Set by hand" : "Read from the compass"}
+            {draft.is360
+              ? "Dome / panoramic — every direction"
+              : draft.headingSource === "manual"
+                ? "Set by hand"
+                : "Read from the compass"}
           </p>
         </div>
       </div>

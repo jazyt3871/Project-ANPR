@@ -114,7 +114,7 @@ const PLACEHOLDER_JPEG_BASE64 = [
 /** Points around downtown Toronto, with plausible bearings. */
 const SAMPLES = [
   { lat: 43.64877, lng: -79.38171, heading: 41, accuracy: 6.2, note: "Above the bank entrance, facing the intersection." },
-  { lat: 43.65107, lng: -79.38393, heading: 187, accuracy: 9.8, note: "Dome housing under the parking garage soffit." },
+  { lat: 43.65107, lng: -79.38393, heading: 0, is360: true, accuracy: 9.8, note: "Panoramic dome under the parking garage soffit — covers the whole level." },
   { lat: 43.65322, lng: -79.38412, heading: 275, accuracy: 4.5, note: "Two units on the same bracket; this is the left one." },
   { lat: 43.64611, lng: -79.38079, heading: 118, accuracy: 14.1, note: "Covers the loading bay and the alley behind it." },
   { lat: 43.65544, lng: -79.38065, heading: 352, accuracy: 7.7, note: "Pointed up the sidewalk toward the transit entrance." },
@@ -160,6 +160,7 @@ async function main() {
         accuracy: sample.accuracy,
         heading: sample.heading,
         headingSource: sample.headingSource ?? "sensor",
+        is360: sample.is360 ?? false,
         photoKey,
         photoWidth: 480,
         photoHeight: 360,

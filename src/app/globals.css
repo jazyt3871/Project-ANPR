@@ -333,7 +333,9 @@
    ========================================================================== */
 
 #sightline-cone stop,
-#sightline-cone-dim stop {
+#sightline-cone-dim stop,
+#sightline-360 stop,
+#sightline-360-dim stop {
   stop-color: var(--sodium);
 }
 
@@ -347,6 +349,18 @@
 
 .sl-cone-dim {
   fill: url(#sightline-cone-dim);
+}
+
+.sl-360 {
+  fill: url(#sightline-360);
+  stroke: var(--sodium);
+  stroke-opacity: 0.55;
+}
+
+.sl-360-dim {
+  fill: url(#sightline-360-dim);
+  stroke: var(--sodium);
+  stroke-opacity: 0.3;
 }
 
 .sl-ray {

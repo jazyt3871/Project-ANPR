@@ -34,6 +34,21 @@ export function SightlineDefs() {
           <stop offset="0%" stopOpacity="0.32" />
           <stop offset="100%" stopOpacity="0.04" />
         </radialGradient>
+
+        {/* For 360°/panoramic cameras: centered rather than anchored at the
+            apex like the cone gradients above, since there is no single lens
+            direction to be dense toward — the coverage is the whole ring. */}
+        <radialGradient id="sightline-360" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopOpacity="0.5" />
+          <stop offset="70%" stopOpacity="0.16" />
+          <stop offset="100%" stopOpacity="0" />
+        </radialGradient>
+
+        <radialGradient id="sightline-360-dim" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopOpacity="0.28" />
+          <stop offset="70%" stopOpacity="0.09" />
+          <stop offset="100%" stopOpacity="0" />
+        </radialGradient>
       </defs>
     </svg>
   );

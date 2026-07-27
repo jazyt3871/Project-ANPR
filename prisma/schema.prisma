@@ -29,9 +29,15 @@ model Camera {
   lng      Float  @map("longitude")
   accuracy Float? // reported horizontal accuracy radius, in metres
 
-  // Where the camera is looking: degrees clockwise from true north
+  // Where the camera is looking: degrees clockwise from true north. Meaningless
+  // when is360 is set — stored as 0 by convention rather than made nullable,
+  // so every row keeps a single non-nullable shape regardless of camera type.
   heading       Float
-  headingSource String @default("sensor") @map("heading_source") // "sensor" | "manual"
+  headingSource String  @default("sensor") @map("heading_source") // "sensor" | "manual"
+  // Domes and panoramic rigs cover every bearing at once, so there is nothing
+  // to point a cone at. Set by a dedicated action in the capture flow instead
+  // of by locking a direction.
+  is360         Boolean @default(false) @map("is_360")
 
   // Photo object key (YYYY/MM/<uuid>.<ext>) under UPLOAD_DIR, resolved to a URL
   // at read time by photoUrl() in src/lib/storage.ts

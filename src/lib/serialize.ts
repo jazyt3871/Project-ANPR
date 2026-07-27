@@ -31,6 +31,7 @@ export function toDTO(row: CameraRow, viewer: SessionUser | null = null): Camera
     accuracy: row.accuracy,
     heading: row.heading,
     headingSource: row.headingSource as HeadingSource,
+    is360: row.is360,
     photoUrl: photoUrl(row.photoKey),
     photoWidth: row.photoWidth,
     photoHeight: row.photoHeight,

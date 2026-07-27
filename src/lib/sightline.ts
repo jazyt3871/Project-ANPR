@@ -56,8 +56,21 @@ export function rayPath(
 /**
  * Marker markup for Leaflet's divIcon, which takes an HTML string rather than
  * a React node. Same paths and same classes as the React renderers.
+ *
+ * `is360` draws a full ring instead of a cone: a dome or panoramic rig has no
+ * single bearing to rotate a wedge toward, so there is nothing for `bearing`
+ * to mean, and it is ignored.
  */
-export function markerHtml(bearing: number, selected: boolean): string {
+export function markerHtml(bearing: number, selected: boolean, is360 = false): string {
+  if (is360) {
+    const ringClass = selected ? "sl-360" : "sl-360-dim";
+    return `<svg viewBox="0 0 ${GLYPH_VIEWBOX} ${GLYPH_VIEWBOX}" width="${GLYPH_VIEWBOX}" height="${GLYPH_VIEWBOX}" aria-hidden="true">
+  <circle class="${ringClass}" cx="${GLYPH_CENTER}" cy="${GLYPH_CENTER}" r="${CONE_LENGTH}" stroke-width="1.5" stroke-dasharray="3 4" />
+  <circle class="sl-hub" cx="${GLYPH_CENTER}" cy="${GLYPH_CENTER}" r="7.5" stroke-width="2" opacity="${selected ? 1 : 0.92}" />
+  <circle class="sl-core" cx="${GLYPH_CENTER}" cy="${GLYPH_CENTER}" r="2.5" />
+</svg>`;
+  }
+
   const coneClass = selected ? "sl-cone" : "sl-cone-dim";
 
   return `<svg viewBox="0 0 ${GLYPH_VIEWBOX} ${GLYPH_VIEWBOX}" width="${GLYPH_VIEWBOX}" height="${GLYPH_VIEWBOX}" aria-hidden="true">

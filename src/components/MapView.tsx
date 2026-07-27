@@ -220,10 +220,11 @@ export default function MapView({
       const selected = camera.id === selectedId;
       const icon = L.divIcon({
         className: "camera-marker",
-        html: markerHtml(camera.heading, selected),
+        html: markerHtml(camera.heading, selected, camera.is360),
         iconSize: [76, 76],
         iconAnchor: [38, 38],
       });
+      const label = camera.is360 ? "360° camera" : `Camera looking ${Math.round(camera.heading)}°`;
 
       const existing = live.get(camera.id);
       if (existing) {
@@ -237,8 +238,8 @@ export default function MapView({
       const marker = L.marker([camera.lat, camera.lng], {
         icon,
         keyboard: true,
-        title: `Camera looking ${Math.round(camera.heading)}°`,
-        alt: `Camera looking ${Math.round(camera.heading)} degrees`,
+        title: label,
+        alt: label,
         riseOnHover: true,
       });
       marker.on("click", (e: L.LeafletMouseEvent) => {

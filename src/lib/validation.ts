@@ -10,6 +10,10 @@ export const cameraSubmission = z.object({
   accuracy: z.coerce.number().finite().min(0).max(100_000).optional(),
   heading: z.coerce.number().finite().min(0).max(360),
   headingSource: z.enum(["sensor", "manual"]).default("sensor"),
+  // FormData carries booleans as the strings "true"/"false", never real
+  // booleans, so z.coerce.boolean() (which treats any non-empty string as
+  // true) would treat "false" as true. Compare to the literal string instead.
+  is360: z.preprocess((v) => v === "true" || v === true, z.boolean()).default(false),
   note: z
     .string()
     .trim()
