@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { currentUser } from "@/lib/auth";
 import { crossesAntimeridian, parseBBox } from "@/lib/geo";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { storage, submitterHash } from "@/lib/storage";
@@ -48,15 +49,19 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // The viewer decides only which delete buttons the client renders; the
+    // DELETE handler re-checks independently, so a forged canDelete is inert.
+    const viewer = await currentUser();
     const cameras = await prisma.camera.findMany({
       where,
       orderBy: { createdAt: "desc" },
       take: limit,
+      include: { user: { select: { username: true } } },
     });
 
     return NextResponse.json(
       {
-        cameras: cameras.map(toDTO),
+        cameras: cameras.map((row) => toDTO(row, viewer)),
         count: cameras.length,
         truncated: cameras.length === limit,
       },
@@ -79,6 +84,16 @@ export async function GET(request: NextRequest) {
 /* -------------------------------------------------------------------------- */
 
 export async function POST(request: NextRequest) {
+  // Reading the map is open; adding to it is not. Checked before anything is
+  // parsed or written, so an anonymous request costs nothing but this lookup.
+  const user = await currentUser();
+  if (!user) {
+    return NextResponse.json(
+      { error: "Sign in to add a camera." },
+      { status: 401, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
   const ip = clientIp(request.headers);
   const limitResult = await rateLimit(`submit:${ip}`, RATE_LIMIT_PER_HOUR, 60 * 60_000);
   if (!limitResult.ok) {
@@ -169,10 +184,15 @@ export async function POST(request: NextRequest) {
         note: data.note ?? null,
         capturedAt: data.capturedAt ?? new Date(),
         submitterHash: submitterHash(ip, request.headers.get("user-agent") ?? ""),
+        userId: user.id,
       },
+      // Without this the returned row has no `user`, and the DTO the client
+      // renders straight into the detail sheet would say "anonymous" until the
+      // next refetch.
+      include: { user: { select: { username: true } } },
     });
 
-    return NextResponse.json({ camera: toDTO(camera) }, { status: 201 });
+    return NextResponse.json({ camera: toDTO(camera, user) }, { status: 201 });
   } catch (err) {
     console.error("[cameras] insert failed", err);
     return NextResponse.json(

@@ -259,6 +259,12 @@ RATE_LIMIT_PER_HOUR="20"
 
 # Salts the coarse submitter tag stored with each row.
 SUBMITTER_SALT="$salt"
+
+# Left off deliberately: http://localhost is treated as a secure context by
+# browsers, and a Cloudflare Tunnel terminates real HTTPS, so Secure cookies
+# work on both. Set this to "true" only if you serve the site to other machines
+# over plain http://<lan-ip>, where sign-in would otherwise fail silently.
+# INSECURE_COOKIES="true"
 "@ | Set-Content $EnvFile -Encoding UTF8
   Write-Ok "wrote $EnvFile"
 }
@@ -295,6 +301,12 @@ if (-not $SkipBuild) {
       npm run db:seed
       Write-Ok "seeded"
     }
+
+    # The admin account. Prints a generated password on first run only; a
+    # re-run reports that it exists and leaves the password alone, so
+    # redeploying never invalidates credentials you already wrote down.
+    Write-Step "Admin account"
+    npm run --silent admin
   } finally { Pop-Location }
 } else {
   Write-Warn "skipping build (-SkipBuild)"

@@ -46,13 +46,53 @@ model Camera {
   // Coarse, non-identifying submitter tag so abusive sources can be rate-limited
   submitterHash String? @map("submitter_hash")
 
+  // Who submitted it. Null for rows predating accounts, and for submissions
+  // whose account has since been deleted — the camera outlives the account.
+  userId String? @map("user_id") @db.Uuid
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
   // NOTE: the `location` geometry(Point, 4326) column is deliberately absent
   // here. Prisma has no geometry type, and the trigger in db/schema.sql keeps
   // it in sync from latitude/longitude. Spatial reads go via $queryRaw.
 
   @@index([lat, lng])
   @@index([createdAt])
+  @@index([userId])
   @@map("cameras")
+}
+
+/// An account. Reading the map needs none of this; submitting and deleting do.
+model User {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  username     String
+  /// scrypt, written and verified only by src/lib/auth.ts. Never leaves the server.
+  passwordHash String   @map("password_hash")
+  /// "user" | "admin". Admins can delete any camera, not only their own.
+  role         String   @default("user")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  sessions Session[]
+  cameras  Camera[]
+
+  // The case-insensitive unique index on lower(username) lives in db/schema.sql;
+  // Prisma cannot express a functional index, so it is absent here.
+  @@map("users")
+}
+
+/// A logged-in session. Rows rather than signed tokens, so logout revokes
+/// immediately. Only the hash of the token is stored.
+model Session {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  tokenHash String   @unique @map("token_hash")
+  createdAt DateTime @default(now()) @map("created_at")
+  expiresAt DateTime @map("expires_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
 }
 
 /// Shared state for the submission limiter. In the database rather than in

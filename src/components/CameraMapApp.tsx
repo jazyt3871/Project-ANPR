@@ -2,10 +2,13 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Cctv, LocateFixed, Moon, Plus, Sun, TriangleAlert } from "lucide-react";
+import { Cctv, LocateFixed, LogOut, Moon, Plus, Sun, TriangleAlert, User } from "lucide-react";
 import { AddCameraDrawer } from "@/components/AddCameraDrawer";
+import { AuthSheet } from "@/components/AuthSheet";
 import { CameraDetailSheet } from "@/components/CameraDetailSheet";
+import { UnlockGate } from "@/components/UnlockGate";
 import { cx } from "@/components/ui/primitives";
+import { useAuth } from "@/hooks/useAuth";
 import type { Fix } from "@/hooks/useGeolocation";
 import type { CameraDTO } from "@/lib/types";
 
@@ -20,6 +23,8 @@ const MapView = dynamic(() => import("@/components/MapView"), {
 
 const BBOX_DEBOUNCE_MS = 350;
 const THEME_KEY = "anpr:theme";
+/** Remembers that this visitor chose to browse without an account. */
+const GUEST_KEY = "anpr:guest";
 
 export function CameraMapApp() {
   /* Merged store: panning away and back shouldn't make markers blink out. */
@@ -36,14 +41,55 @@ export function CameraMapApp() {
   const [recenterToken, setRecenterToken] = useState(0);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
 
+  const auth = useAuth();
+  const [guest, setGuest] = useState(false);
+  const [gateChecked, setGateChecked] = useState(false);
+  const [authSheet, setAuthSheet] = useState<null | {
+    mode: "signin" | "register";
+    reason?: string;
+  }>(null);
+
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlight = useRef<AbortController | null>(null);
+  /** The last bbox the map reported, so an auth change can re-query the same area. */
+  const lastBBox = useRef<string | null>(null);
 
   /* --------------------------------------------------------------- theme -- */
   useEffect(() => {
     const stored = window.localStorage.getItem(THEME_KEY);
     setTheme(stored === "light" ? "light" : "dark");
   }, []);
+
+  /* ---------------------------------------------------------------- gate -- */
+  useEffect(() => {
+    try {
+      setGuest(window.localStorage.getItem(GUEST_KEY) === "true");
+    } catch {
+      /* private mode: the gate reappears next visit, which is harmless */
+    }
+    setGateChecked(true);
+  }, []);
+
+  const continueAsGuest = useCallback(() => {
+    setGuest(true);
+    try {
+      window.localStorage.setItem(GUEST_KEY, "true");
+    } catch {
+      /* private mode */
+    }
+  }, []);
+
+  const signOut = useCallback(async () => {
+    await auth.signOut();
+    // Back to the gate rather than straight into a guest session: signing out
+    // is a deliberate act, and silently becoming a guest hides that it worked.
+    setGuest(false);
+    try {
+      window.localStorage.removeItem(GUEST_KEY);
+    } catch {
+      /* private mode */
+    }
+  }, [auth]);
 
   const toggleTheme = useCallback(() => {
     setTheme((prev) => {
@@ -93,11 +139,33 @@ export function CameraMapApp() {
 
   const handleBBoxChange = useCallback(
     (bbox: string) => {
+      lastBBox.current = bbox;
       if (debounce.current) clearTimeout(debounce.current);
       debounce.current = setTimeout(() => void load(bbox), BBOX_DEBOUNCE_MS);
     },
     [load],
   );
+
+  /**
+   * canDelete is decided per request by the server, so every camera already in
+   * the store carries the *previous* session's answer. Signing in or out
+   * invalidates all of it — drop the store and re-query, rather than leaving
+   * delete buttons that are missing (or, worse, present and unauthorised).
+   */
+  const authUserId = auth.user?.id ?? null;
+  const previousAuthUserId = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    // Skip the first run: the initial load has not happened yet.
+    if (previousAuthUserId.current === undefined) {
+      previousAuthUserId.current = authUserId;
+      return;
+    }
+    if (previousAuthUserId.current === authUserId) return;
+    previousAuthUserId.current = authUserId;
+
+    setCameras(new Map());
+    if (lastBBox.current) void load(lastBBox.current);
+  }, [authUserId, load]);
 
   useEffect(
     () => () => {
@@ -129,6 +197,26 @@ export function CameraMapApp() {
     setVisibleCount((n) => n + 1);
     setSelectedId(camera.id);
   }, []);
+
+  const handleDeleted = useCallback((id: string) => {
+    setCameras((prev) => {
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
+    setVisibleCount((n) => Math.max(0, n - 1));
+    setSelectedId(null);
+  }, []);
+
+  /** The FAB, but only for someone who can actually complete the flow. */
+  const startAdding = useCallback(() => {
+    if (!auth.user) {
+      setAuthSheet({ mode: "signin", reason: "Adding a camera needs an account." });
+      return;
+    }
+    setSelectedId(null);
+    setDrawerOpen(true);
+  }, [auth.user]);
 
   const locateMe = useCallback((options?: { silent?: boolean }) => {
     if (!("geolocation" in navigator)) return;
@@ -250,6 +338,36 @@ export function CameraMapApp() {
             >
               {theme === "dark" ? <Sun className="size-[18px]" /> : <Moon className="size-[18px]" />}
             </button>
+
+            {auth.user ? (
+              <button
+                type="button"
+                onClick={() => void signOut()}
+                title={
+                  auth.user.role === "admin"
+                    ? `Signed in as ${auth.user.username} (admin) — sign out`
+                    : `Signed in as ${auth.user.username} — sign out`
+                }
+                aria-label={`Signed in as ${auth.user.username}. Sign out.`}
+                className="flex h-9 items-center gap-1.5 rounded-lg px-2 text-graphite transition-colors hover:bg-raised hover:text-ink"
+              >
+                <User
+                  className={cx("size-[18px]", auth.user.role === "admin" && "text-sodium")}
+                />
+                <span className="hidden max-w-[8rem] truncate text-[0.8125rem] sm:inline">
+                  {auth.user.username}
+                </span>
+                <LogOut className="size-3.5 opacity-70" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setAuthSheet({ mode: "signin" })}
+                className="h-9 rounded-lg px-2.5 text-[0.8125rem] font-medium text-graphite transition-colors hover:bg-raised hover:text-ink"
+              >
+                Sign in
+              </button>
+            )}
           </span>
         </div>
 
@@ -283,10 +401,7 @@ export function CameraMapApp() {
       {!drawerOpen ? (
         <button
           type="button"
-          onClick={() => {
-            setSelectedId(null);
-            setDrawerOpen(true);
-          }}
+          onClick={startAdding}
           className="absolute right-4 z-[600] flex h-14 items-center gap-2.5 rounded-full bg-sodium pr-5 pl-4 text-sodium-ink transition-transform active:scale-95"
           style={{
             bottom: "max(1.5rem, calc(env(safe-area-inset-bottom) + 1rem))",
@@ -310,7 +425,30 @@ export function CameraMapApp() {
       />
 
       {!drawerOpen ? (
-        <CameraDetailSheet camera={selected} onClose={() => setSelectedId(null)} />
+        <CameraDetailSheet
+          camera={selected}
+          onClose={() => setSelectedId(null)}
+          onDeleted={handleDeleted}
+        />
+      ) : null}
+
+      <AuthSheet
+        open={authSheet !== null}
+        onClose={() => setAuthSheet(null)}
+        initialMode={authSheet?.mode ?? "signin"}
+        reason={authSheet?.reason}
+        onSignIn={auth.signIn}
+        onRegister={auth.register}
+      />
+
+      {/* The gate waits for both checks so it cannot flash in front of someone
+          who is already signed in, or who chose guest on a previous visit. */}
+      {gateChecked && !auth.loading && !auth.user && !guest ? (
+        <UnlockGate
+          onSignIn={() => setAuthSheet({ mode: "signin" })}
+          onRegister={() => setAuthSheet({ mode: "register" })}
+          onGuest={continueAsGuest}
+        />
       ) : null}
     </main>
   );

@@ -3,7 +3,7 @@
 A crowdsourced map of camera locations. Each submission is three things measured
 from the street: a GPS fix, the bearing the lens looks along, and a photo.
 
-Mobile-first, dark by default, no account required.
+Mobile-first, dark by default. Browsing needs no account; contributing does.
 
 ---
 
@@ -91,6 +91,7 @@ npm start                   # serves on :3000
 | `npm run db:push` | ⚠️ Drops the `location` geometry column — see the warning above. Edit `db/schema.sql` instead. |
 | `npm run db:schema` | Applies `db/schema.sql` to `$DATABASE_URL` |
 | `npm run db:seed` | Inserts sample cameras; reads `.env` itself, idempotent, safe to re-run |
+| `npm run admin` | Creates the `anpr` admin and prints a generated password. `-- --reset-password` rotates it |
 | `npm run db:studio` | Prisma Studio, to browse rows |
 
 ### Verified state
@@ -116,6 +117,26 @@ build) all behave as documented. Neither has been exercised on a fresh VPS.
 `scripts/install-windows.ps1` and `scripts/start-windows.ps1` have been
 reviewed but not executed — no PowerShell or Windows machine was available in
 these checks.
+
+Accounts and deletion were exercised end to end against that same live
+Postgres, through the API and through a real browser (Chromium via Playwright):
+registering, signing in, and signing out; a guest being refused `POST` (401)
+and `DELETE` (401); one user being refused deletion of another's camera (403)
+while the owner and the admin both succeed (200), with the photo file removed
+from disk alongside the row; wrong-password and unknown-username both
+answering 401; logout deleting the session row rather than only the cookie;
+and `/api/geo` returning the right box for a Cloudflare/Vercel country header,
+the world for an absent, anonymised (`XX`) or unrecognised code. In the browser:
+the gate appearing for a new visitor and dismissing on "continue as a guest",
+the FAB prompting for an account as a guest and opening the capture flow once
+signed in, and an owner deleting their own camera through the confirm step with
+the marker disappearing from the map.
+
+Two bugs that only the browser pass caught, both now fixed: the sign-in sheet
+opened on the wrong tab after the first time (`useState(initialMode)` never
+re-read the prop on a component that stays mounted), and the gate's overlay sat
+above the sheet and swallowed every click meant for the form — making
+registration impossible from the gate.
 
 The `next build`'s standalone output (what `Dockerfile` and Fly ship) has been
 run directly — `node .next/standalone/server.js` against the same live
@@ -232,6 +253,60 @@ shots don't land sideways.
 | `MAX_UPLOAD_BYTES` | `8388608` | Rejected above this with `413` |
 | `RATE_LIMIT_PER_HOUR` | `20` | Submissions per IP |
 | `SUBMITTER_SALT` | `project-anpr` | Salt for the coarse submitter tag |
+| `INSECURE_COOKIES` | unset | Set `true` only to keep session cookies working over plain HTTP in production — see [Accounts](#accounts) |
+
+---
+
+## Accounts
+
+Reading the map needs no account. Adding a camera does, and so does removing
+one.
+
+A first-time visitor gets a gate with three options — create an account, sign
+in, or **continue as a guest**. Guest is a real choice, not fine print: the map
+is public information, and putting a wall in front of it would be dishonest
+about what this is. The account buys the ability to contribute, and that is
+what the copy promises.
+
+| Who | Can view | Can add | Can delete |
+| --- | --- | --- | --- |
+| Guest | yes | no | no |
+| Signed in | yes | yes | their own submissions |
+| `anpr` (admin) | yes | yes | anything |
+
+The admin account is created by the installers, or by hand:
+
+```bash
+npm run admin                        # creates "anpr", prints a generated password
+npm run admin -- --reset-password    # rotate it
+npm run admin -- --username someone  # promote/create a different admin
+```
+
+The password is a six-word passphrase plus digits — long enough to resist
+guessing, and possible to retype on a phone, which a random character string
+is not. It is printed **once** and stored only as a hash. Re-running the
+installer does not rotate it, so a redeploy never invalidates the credentials
+you wrote down.
+
+### How it works
+
+- **Passwords** are scrypt hashes (`node:crypto`). Not bcrypt or argon2:
+  both are native modules needing per-platform builds, and this installs on a
+  VPS, on Windows and inside a slim container. scrypt is memory-hard and in
+  the standard library.
+- **Sessions** are rows in `sessions`, not signed tokens, so signing out
+  revokes access immediately instead of at expiry. Only the SHA-256 of each
+  token is stored — a database dump does not hand over live sessions.
+- **The cookie** is httpOnly and SameSite=Lax, and `Secure` in production
+  unless `INSECURE_COOKIES=true`, which exists because the default deployment
+  runs on a bare IP over HTTP before a domain and certificate exist.
+- **Deletion** removes the row and the photo file. Who may delete is decided
+  by one function, `canDelete()` in `src/lib/serialize.ts`, called both by the
+  serializer that decides whether the client renders a delete button and by
+  the DELETE handler that enforces it — so the two cannot drift apart. A
+  forged `canDelete` in a response body buys nothing.
+- **Deleting an account** leaves its cameras on the map, owned by nobody
+  (`on delete set null`), rather than silently erasing contributions.
 
 ---
 
@@ -594,6 +669,7 @@ prisma/
   schema.prisma            Postgres; Camera + RateLimitHit models
 scripts/
   seed.mjs                 Eight sample cameras + an embedded placeholder JPEG
+  create-admin.mjs         Creates/promotes the admin, prints a generated password
   install-linux.sh          Ubuntu: deps, Postgres, systemd, nginx, ufw, TLS
   start-linux.sh            Foreground launcher for a Linux box without systemd
   install-windows.ps1       Windows: deps, Postgres, .env, build, Cloudflare Tunnel
@@ -606,26 +682,33 @@ src/
     globals.css            Design tokens, theme flip, Leaflet skin, glyph classes
     api/
       README.md            Full endpoint + field reference
-      cameras/route.ts     GET (bbox) + POST (multipart)
-      cameras/[id]/route.ts
+      auth/                register, login, logout, me
+      geo/route.ts         Country bounding box from the proxy's header
+      cameras/route.ts     GET (bbox) + POST (multipart, needs an account)
+      cameras/[id]/route.ts GET + DELETE (owner or admin)
       photos/[...key]/route.ts
   components/
     CameraMapApp.tsx       Shell: instrument strip, FAB, fetching, state
     MapView.tsx            Leaflet, rotated markers, accuracy disc, pin-drop
     AddCameraDrawer.tsx    Four-step flow orchestration
     CompassDial.tsx        Azimuth card under a fixed sightline
-    CameraDetailSheet.tsx  Photo, bearing, coordinates, OSM link
+    CameraDetailSheet.tsx  Photo, bearing, coordinates, OSM link, delete
+    UnlockGate.tsx         First-visit gate: sign in, register, or guest
+    AuthSheet.tsx          Sign-in / registration form
     SightlineGlyph.tsx     The marker, as a React node
     SightlineDefs.tsx      Gradients, defined once for the whole document
     steps/                 One file per capture step
     ui/primitives.tsx      Button, Sheet, FieldRow, Notice
   hooks/
+    useAuth.ts             Session state, sign in / register / sign out
     useGeolocation.ts      Converging high-accuracy fix
     useDeviceHeading.ts    Cross-platform compass + manual fallback
   lib/
     sightline.ts           The cone geometry — one definition, three renderers
     geo.ts                 Bearings, bbox parsing, circular mean, distance
     image.ts               Client-side downscale + EXIF strip
+    auth.ts                scrypt passwords, database-backed sessions
+    country-bounds.ts      ISO-3166 bounding boxes for the opening map view
     storage.ts             Photos on disk, behind a swappable driver interface
     validation.ts          Zod schemas
     rate-limit.ts          Sliding window

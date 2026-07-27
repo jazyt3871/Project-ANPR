@@ -339,6 +339,18 @@ fi
 install -d -o "$APP_USER" -g "$APP_GROUP" -m 0755 "$UPLOAD_DIR"
 ok "uploads: ${UPLOAD_DIR}"
 
+# Session cookies are Secure in production, so a browser will not send them
+# back over plain HTTP — sign-in would appear to succeed and then silently not
+# stick. Without a certificate that is exactly the deployment we produce, so
+# say so explicitly rather than shipping a login that mysteriously fails.
+if [[ -n "$DOMAIN" && -n "$LETSENCRYPT_EMAIL" ]]; then
+  INSECURE_COOKIES="false"
+else
+  INSECURE_COOKIES="true"
+  warn "no HTTPS yet, so session cookies are set without the Secure flag"
+  info "re-run with --nginx --domain <host> --email <you> once DNS points here"
+fi
+
 if [[ -f "$ENV_FILE" ]]; then
   # Rewrite only the lines this script owns; anything else the operator added
   # (rate limits, salts) is left alone.
@@ -357,6 +369,7 @@ if [[ -f "$ENV_FILE" ]]; then
   }
   set_env DATABASE_URL "$DATABASE_URL"
   set_env UPLOAD_DIR "$UPLOAD_DIR"
+  set_env INSECURE_COOKIES "$INSECURE_COOKIES"
   ok "updated existing .env"
 else
   cat > "$ENV_FILE" <<EOF
@@ -374,6 +387,11 @@ RATE_LIMIT_PER_HOUR="20"
 
 # Salts the coarse submitter tag stored with each row.
 SUBMITTER_SALT="$(openssl rand -hex 32)"
+
+# "true" while the site is served over plain HTTP: a Secure cookie would never
+# come back, and sign-in would fail silently. Set to "false" once HTTPS is in
+# place — re-running this script with --domain does that for you.
+INSECURE_COOKIES="${INSECURE_COOKIES}"
 EOF
   ok "wrote ${ENV_FILE}"
 fi
@@ -408,6 +426,12 @@ if [[ $WITH_BUILD == 1 ]]; then
     (cd "$APP_DIR" && run_as_app npm run db:seed)
     ok "seeded"
   fi
+
+  # The admin account. Prints a generated password on first run only; on a
+  # re-run it reports that the account exists and leaves the password alone,
+  # so redeploying never invalidates the credentials you wrote down.
+  step "Admin account"
+  (cd "$APP_DIR" && run_as_app npm run --silent admin)
 else
   warn "skipping build (--no-build) — .next must already exist"
 fi

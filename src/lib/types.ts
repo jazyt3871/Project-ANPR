@@ -14,6 +14,17 @@ export type CameraDTO = {
   note: string | null;
   capturedAt: string;
   createdAt: string;
+  /** Username of whoever submitted it; null for rows predating accounts. */
+  submittedBy: string | null;
+  /** Whether the requesting viewer may delete it — see canDelete() in serialize.ts. */
+  canDelete: boolean;
+};
+
+/** The signed-in account, as the browser sees it. Null means browsing as a guest. */
+export type AuthUser = {
+  id: string;
+  username: string;
+  role: "user" | "admin";
 };
 
 /** What the capture flow assembles before it is posted. */

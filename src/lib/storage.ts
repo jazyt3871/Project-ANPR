@@ -19,6 +19,8 @@ export interface StorageDriver {
   readonly name: string;
   put(bytes: Uint8Array, contentType: string): Promise<PutResult>;
   get(key: string): Promise<GetResult>;
+  /** Delete a stored object. Must resolve, not throw, when it is already gone. */
+  remove(key: string): Promise<void>;
   /** Public URL, or null when bytes must be streamed through /api/photos. */
   publicUrl(key: string): string | null;
 }
@@ -108,6 +110,16 @@ class LocalDriver implements StorageDriver {
   async get(key: string): Promise<GetResult> {
     const file = await fs.readFile(this.resolve(key));
     return { body: toArrayBuffer(file), contentType: contentTypeForKey(key) };
+  }
+
+  async remove(key: string): Promise<void> {
+    try {
+      await fs.unlink(this.resolve(key));
+    } catch (err) {
+      // Already gone is the desired end state, not a failure. Anything else
+      // (permissions, I/O) is worth surfacing to the caller.
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
   }
 
   publicUrl(): string | null {

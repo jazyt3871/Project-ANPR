@@ -34,8 +34,13 @@ const TILES = {
 const ATTRIBUTION =
   '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &middot; &copy; <a href="https://carto.com/attributions">CARTO</a>';
 
-const FALLBACK_VIEW: L.LatLngTuple = [43.6532, -79.3832];
-const FALLBACK_ZOOM = 13;
+/**
+ * Where a first-time visitor starts, before /api/geo answers: the whole world.
+ * Deliberately not a city — opening on somewhere specific tells a visitor in
+ * another country that the map is not for them.
+ */
+const WORLD_VIEW: L.LatLngTuple = [20, 0];
+const WORLD_ZOOM = 2;
 
 /** Last map centre + zoom, so a return visit opens where you left off. */
 const VIEW_KEY = "anpr:view";
@@ -97,6 +102,9 @@ export default function MapView({
   const markersRef = useRef(new Map<string, L.Marker>());
   const markerLayerRef = useRef<L.LayerGroup | null>(null);
   const fixLayerRef = useRef<L.LayerGroup | null>(null);
+  const geoAbortRef = useRef<AbortController | null>(null);
+  /** Set by any user-initiated pan or zoom, so a late /api/geo cannot yank the view. */
+  const userHasMovedRef = useRef(false);
 
   // Callbacks live in refs so the init effect can stay a true mount-once.
   const cb = useRef({ onSelect, onBBoxChange, onPick, pickMode });
@@ -111,11 +119,37 @@ export default function MapView({
     const stored = readStoredView();
 
     const map = L.map(hostRef.current, {
-      center: stored ? [stored.lat, stored.lng] : FALLBACK_VIEW,
-      zoom: stored ? stored.zoom : FALLBACK_ZOOM,
+      center: stored ? [stored.lat, stored.lng] : WORLD_VIEW,
+      zoom: stored ? stored.zoom : WORLD_ZOOM,
       zoomControl: false,
       attributionControl: true,
     });
+
+    // First visit only: ask the server which country this request came from and
+    // frame it. Skipped entirely when a stored view exists, because someone
+    // returning to the map wants where they left off, not their country again.
+    if (!stored) {
+      const controller = new AbortController();
+      geoAbortRef.current = controller;
+      fetch("/api/geo", { signal: controller.signal })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((payload: { bounds?: [number, number, number, number] } | null) => {
+          // The map may have been removed, or the user may already have panned —
+          // in either case leaving their view alone is the only correct move.
+          if (!payload?.bounds || !mapRef.current || userHasMovedRef.current) return;
+          const [west, south, east, north] = payload.bounds;
+          map.fitBounds(
+            [
+              [south, west],
+              [north, east],
+            ],
+            { animate: false, padding: [20, 20] },
+          );
+        })
+        .catch(() => {
+          /* offline, aborted, or no proxy country header — the world view stands */
+        });
+    }
 
     L.control.zoom({ position: "bottomleft" }).addTo(map);
 
@@ -139,6 +173,11 @@ export default function MapView({
 
     map.on("moveend zoomend", report);
     map.on("moveend zoomend", () => writeStoredView(map));
+    // dragstart/zoomstart fire only for real interaction, not for fitBounds or
+    // flyTo, which is exactly the distinction needed here.
+    map.on("dragstart zoomstart", () => {
+      userHasMovedRef.current = true;
+    });
     map.on("click", (e: L.LeafletMouseEvent) => {
       if (cb.current.pickMode) cb.current.onPick(e.latlng.lat, e.latlng.lng);
       else cb.current.onSelect(null);
@@ -150,6 +189,7 @@ export default function MapView({
     // Captured now: the ref may point elsewhere by the time cleanup runs.
     const markers = markersRef.current;
     return () => {
+      geoAbortRef.current?.abort();
       map.remove();
       mapRef.current = null;
       markers.clear();

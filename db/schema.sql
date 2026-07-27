@@ -128,7 +128,54 @@ create index if not exists cameras_created_at_idx on public.cameras (created_at 
 create index if not exists cameras_lat_lng_idx on public.cameras (latitude, longitude);
 
 -- ---------------------------------------------------------------------------
--- 2. rate_limit_hits — shared state for the submission limiter
+-- 2. users and sessions
+--
+-- Reading the map is open to anyone; submitting and deleting require an
+-- account. Passwords are stored as scrypt hashes written by src/lib/auth.ts —
+-- never plaintext, and never reversible from this table.
+--
+-- Sessions are rows rather than self-contained signed tokens so that logging
+-- out, or deleting an account, actually revokes access immediately instead of
+-- waiting for an expiry. Only the SHA-256 of each token is stored: a leaked
+-- database dump cannot be replayed as a set of live sessions.
+-- ---------------------------------------------------------------------------
+
+create table if not exists public.users (
+  id            uuid primary key default gen_random_uuid(),
+  username      text not null,
+  password_hash text not null,
+  role          text not null default 'user',
+  created_at    timestamptz not null default now(),
+
+  constraint users_role_valid check (role in ('user', 'admin')),
+  constraint users_username_shape check (username ~ '^[A-Za-z0-9_.-]{3,32}$')
+);
+
+-- Case-insensitive uniqueness: "Anpr" and "anpr" must not be two accounts.
+create unique index if not exists users_username_lower_idx
+  on public.users (lower(username));
+
+create table if not exists public.sessions (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references public.users(id) on delete cascade,
+  token_hash text not null unique,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null
+);
+
+create index if not exists sessions_user_idx    on public.sessions (user_id);
+create index if not exists sessions_expires_idx on public.sessions (expires_at);
+
+-- Who submitted a camera, for "delete your own". Nullable on purpose: rows
+-- predating accounts have no owner, and `on delete set null` keeps a deleted
+-- account's contributions on the map rather than silently erasing them.
+alter table public.cameras
+  add column if not exists user_id uuid references public.users(id) on delete set null;
+
+create index if not exists cameras_user_idx on public.cameras (user_id);
+
+-- ---------------------------------------------------------------------------
+-- 3. rate_limit_hits — shared state for the submission limiter
 -- ---------------------------------------------------------------------------
 
 create table if not exists public.rate_limit_hits (
